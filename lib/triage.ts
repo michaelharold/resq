@@ -23,6 +23,7 @@ import {
 } from "./taxonomy";
 import type { NeedType, Skill, TriageResult, Urgency } from "./types";
 import { triageByRules } from "./triage-rules";
+import { NO_HAZARD } from "./hazards";
 
 export type OllamaTriageOutput = {
   type: NeedType;
@@ -235,7 +236,7 @@ export async function triageWithOllama(text: string, signal: AbortSignal): Promi
     throw new Error("ollama: output failed type guard");
   }
   const normalised = normalizeTriageOutput(parsed, text);
-  return { ...normalised, source: "ollama", clarifyingQuestion: null };
+  return { ...normalised, source: "ollama", clarifyingQuestion: null, equipment: [], hazardAlert: NO_HAZARD };
 }
 
 // ---------------------------------------------------------------------------

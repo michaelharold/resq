@@ -12,6 +12,8 @@
  */
 import type { NEED_TYPES, SKILLS, URGENCIES, Equipment } from "./taxonomy";
 export type { Equipment } from "./taxonomy";
+import type { HazardKind } from "./hazards";
+export type { HazardKind } from "./hazards";
 
 export type Skill = (typeof SKILLS)[number];
 export type NeedType = (typeof NEED_TYPES)[number];
@@ -30,6 +32,9 @@ export type Helper = {
   reliability: number; // 0..1, starts 0.7 (INITIAL_RELIABILITY)
   lastSeen: string;
   equipment?: Equipment[]; // what they own that helps in an emergency
+  trustTier?: TrustTier;        // read via tierOf() — absent on older records = TIER_1_NEIGHBOR
+  credentialId?: string | null; // licence / registration number given for Tier 2 / Tier 3 (self-declared in the demo)
+  walletBalance?: number;       // read via walletOf() — credited when escrow is released
   profile?: UserProfile;   // basic details collected at sign-up
 };
 
@@ -48,7 +53,18 @@ export type TriageResult = {
   source: "ollama" | "rules";
   // CLARIFYING_QUESTION when source === "rules" && confidence < 0.5; never blocks dispatch (CONTRACTS §6)
   clarifyingQuestion: string | null;
+  equipment: Equipment[]; // equipment the situation specifically calls for ("need a pump" → water_pump); may be empty
+  hazardAlert: HazardAlert; // hidden scene hazard; texts are curated (lib/hazards.ts), only the kind is classified
 };
+
+/** Hazard warning shown to the requester. hazardTitle/hazardAction are null when hasHazard is false. */
+export type HazardAlert = { hasHazard: boolean; kind: HazardKind; hazardTitle: string | null; hazardAction: string | null };
+
+// ─── Upgrade: monetization, trust tiers ──────────────────────────────────────────────────────────────────────
+export type RequestCategory = "LIFE_SAFETY" | "HOUSEHOLD_MICROGIG";
+export type EscrowStatus = "HELD" | "RELEASED" | "REFUNDED";
+export type GigType = "plumbing" | "electrical" | "generator_power" | "other_repair";
+export type TrustTier = "TIER_1_NEIGHBOR" | "TIER_2_CERTIFIED_PRO" | "TIER_3_FIRST_RESPONDER";
 
 export type RequestStatus = "triaging" | "searching" | "matched" | "resolved" | "escalated" | "cancelled";
 export type RequesterRole = "self" | "other";
@@ -69,6 +85,13 @@ export type HelpRequest = {
   channel: Channel;
   role: RequesterRole; // "self" = the requester is the person in trouble; "other" = a witness/bystander
   requesterProfile?: UserProfile | null; // snapshot of the signed-in requester's profile at request time
+  category?: RequestCategory;          // read via categoryOf() — absent = LIFE_SAFETY
+  gigType?: GigType | null;            // set for HOUSEHOLD_MICROGIG
+  calloutFee?: number;                 // 0 for LIFE_SAFETY; one of CALLOUT_FEES for a micro-gig
+  escrowStatus?: EscrowStatus | null;  // null = no escrow (free request)
+  upgradedToLifeSafety?: boolean;      // filed as a paid job but converted to a free emergency by the safety override
+  fallbackAt?: string | null;          // when the 3-minute / all-waves fallback fired (LIFE_SAFETY)
+  emergencyContactNotifiedAt?: string | null; // when the requester's emergency contact was texted
   triage: TriageResult | null;
   status: RequestStatus;
   wave: number; // 0 before dispatch starts, 1..4 while searching
@@ -116,10 +139,11 @@ export type GuidanceCard = {
 /** Public projection of a dispatch for the requester: no helper name/phone. */
 export type DispatchPublic = Pick<Dispatch, "id" | "wave" | "status" | "distanceKm" | "pingedAt"> & {
   helperSkills: Skill[];
+  helperTier: TrustTier;
 };
 
 /** The matched helper as shown to the requester; distanceKm = the accepted dispatch's distanceKm. */
-export type HelperPublic = Pick<Helper, "id" | "name" | "skills" | "phone" | "location" | "reliability" | "equipment"> & { distanceKm: number | null };
+export type HelperPublic = Pick<Helper, "id" | "name" | "skills" | "phone" | "location" | "reliability" | "equipment"> & { distanceKm: number | null; trustTier: TrustTier };
 
 /** GET /api/requests/:id, POST .../tick, requester SSE snapshot. */
 export type RequestView = {

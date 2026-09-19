@@ -27,6 +27,7 @@
  *    chars of the cleaned text; clarifyingQuestion = CLARIFYING_QUESTION iff confidence
  *    < 0.5 (it never blocks dispatch — CONTRACTS §6).
  */
+import { NO_HAZARD } from "./hazards";
 import type { NeedType, TriageResult, Urgency } from "./types";
 import { CLARIFYING_QUESTION, NEED_TYPES, TYPE_LABELS, TYPE_SKILLS, URGENCIES } from "./taxonomy";
 
@@ -354,6 +355,8 @@ function build(type: NeedType, urgency: Urgency, confidence: number, cleaned: st
     confidence,
     source: "rules",
     clarifyingQuestion: confidence < CLARIFY_BELOW ? CLARIFYING_QUESTION : null,
+    equipment: [],
+    hazardAlert: NO_HAZARD,
   };
 }
 

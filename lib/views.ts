@@ -3,6 +3,7 @@ import { getStore } from "./store";
 import { getGuidance } from "./guidance";
 import { getSeedCenter, haversineKm, waveWindowMs } from "./dispatch";
 import { mapsUrl } from "./sms";
+import { tierOf } from "./policy";
 import type { HelperView, IncomingCard, OpsView, RequestView } from "./types";
 
 const plus = (iso: string, ms: number) => new Date(Date.parse(iso) + ms).toISOString();
@@ -12,10 +13,10 @@ export async function buildRequestView(requestId: string): Promise<RequestView |
   const request = await store.getRequest(requestId);
   if (!request) return null;
   const ds = await store.listDispatches(requestId);
-  const dispatches = await Promise.all(ds.map(async (d) => ({
-    id: d.id, wave: d.wave, status: d.status, distanceKm: d.distanceKm, pingedAt: d.pingedAt,
-    helperSkills: (await store.getHelper(d.helperId))?.skills ?? [],
-  })));
+  const dispatches = await Promise.all(ds.map(async (d) => {
+    const h = await store.getHelper(d.helperId);
+    return { id: d.id, wave: d.wave, status: d.status, distanceKm: d.distanceKm, pingedAt: d.pingedAt, helperSkills: h?.skills ?? [], helperTier: tierOf(h) };
+  }));
   let matchedHelper: RequestView["matchedHelper"] = null;
   if (request.matchedHelperId) {
     const h = await store.getHelper(request.matchedHelperId);
@@ -23,7 +24,7 @@ export async function buildRequestView(requestId: string): Promise<RequestView |
       const acc = ds.find((d) => d.status === "accepted");
       // Live distance when both positions are known (helper shares location while on duty), else the dispatch distance.
       const live = h.location && request.location ? haversineKm(h.location, request.location) : null;
-      matchedHelper = { id: h.id, name: h.name, skills: h.skills, phone: h.phone, location: h.location, reliability: h.reliability, equipment: h.equipment ?? [], distanceKm: live ?? acc?.distanceKm ?? null };
+      matchedHelper = { id: h.id, name: h.name, skills: h.skills, phone: h.phone, location: h.location, reliability: h.reliability, equipment: h.equipment ?? [], trustTier: tierOf(h), distanceKm: live ?? acc?.distanceKm ?? null };
     }
   }
   return {

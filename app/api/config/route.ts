@@ -1,3 +1,4 @@
+import { CALLOUT_FEES, CURRENCY, fallbackMs } from "@/lib/policy";
 import { LANDMARKS } from "@/lib/landmarks";
 /**
  * GET /api/config → { seedCenter, waveWindowMs, smsSimulated, ollamaModel }
@@ -37,5 +38,5 @@ export async function GET(): Promise<Response> {
 
   const smsNumber = process.env.TWILIO_FROM?.trim() || null;
   const landmarks = LANDMARKS.map((l) => ({ name: l.name, location: l.location }));
-  return NextResponse.json({ seedCenter, waveWindowMs, smsSimulated, ollamaModel, smsNumber, landmarks }, { status: 200 });
+  return NextResponse.json({ seedCenter, waveWindowMs, smsSimulated, ollamaModel, smsNumber, landmarks, fallbackMs: fallbackMs(), currency: CURRENCY, calloutFees: CALLOUT_FEES }, { status: 200 });
 }
