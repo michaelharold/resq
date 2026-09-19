@@ -247,6 +247,11 @@ export async function triageWithOllama(text: string, signal: AbortSignal): Promi
  * `triageByRules(text)` on throw / abort / invalid output / confidence < 0.5
  * (README §4). Applies `applyUrgencyFloor` to every Ollama result. Never throws.
  */
+const URGENCY_RANK: Record<Urgency, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+function maxUrgency(a: Urgency, b: Urgency): Urgency {
+  return URGENCY_RANK[a] >= URGENCY_RANK[b] ? a : b;
+}
+
 export async function triage(text: string): Promise<TriageResult> {
   const started = Date.now();
   const controller = new AbortController();
@@ -255,10 +260,15 @@ export async function triage(text: string): Promise<TriageResult> {
   let result: TriageResult;
   try {
     const fromOllama = await triageWithOllama(text, controller.signal);
+    const rules = triageByRules(text);
     if (fromOllama.confidence < 0.5) {
-      result = triageByRules(text);
+      result = rules;
+    } else if (rules.confidence >= 0.8 && rules.type !== fromOllama.type) {
+      // A strong, explicit keyword match beats a 3B model that disagrees (e.g. "water rising, grandmother can't
+      // walk" must be evacuation, not structural collapse). Keep the model's one-line summary; report "rules".
+      result = { ...rules, summary: fromOllama.summary || rules.summary, urgency: maxUrgency(rules.urgency, fromOllama.urgency) };
     } else {
-      result = { ...fromOllama, urgency: applyUrgencyFloor(fromOllama.type, fromOllama.urgency) };
+      result = { ...fromOllama, urgency: maxUrgency(applyUrgencyFloor(fromOllama.type, fromOllama.urgency), rules.type === fromOllama.type ? rules.urgency : "low") };
     }
   } catch {
     result = triageByRules(text);
