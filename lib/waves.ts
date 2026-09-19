@@ -116,6 +116,7 @@ async function runWaveLocked(id: string, first: number): Promise<HelpRequest | n
     const existing = await store.listDispatches(id);
     const exclude = new Set(existing.map((d) => d.helperId));
     if (request.requesterHelperId) exclude.add(request.requesterHelperId);
+    for (const id of await busyHelperIds()) exclude.add(id); // one job at a time
     const t0 = request.triage;
     const gig = categoryOf(request) === "HOUSEHOLD_MICROGIG";
     const neededEquipment = t0?.equipment ?? [];
@@ -262,7 +263,15 @@ export async function onReject(dispatchId: string, via: Channel = "app"): Promis
 export type AcceptOk = { ok: true; request: HelpRequest; dispatch: Dispatch; location: LatLng | null; mapsUrl: string | null; requesterPhone: string | null };
 
 /** "tier_required": the request is a paid micro-gig and the helper is not a TIER_2_CERTIFIED_PRO (policy canAccept). */
-export type AcceptFailReason = StoreErrorReason | "tier_required";
+export type AcceptFailReason = StoreErrorReason | "tier_required" | "busy";
+
+/** Helpers who are already on a job (matched to an open request). They are not pinged and cannot take another. */
+export async function busyHelperIds(): Promise<Set<string>> {
+  return new Set((await getStore().listOpenRequests()).filter((r) => r.status === "matched" && r.matchedHelperId).map((r) => r.matchedHelperId as string));
+}
+async function isBusyElsewhere(helperId: string, requestId: string): Promise<boolean> {
+  return (await getStore().listOpenRequests()).some((r) => r.status === "matched" && r.matchedHelperId === helperId && r.id !== requestId);
+}
 export type ClaimFailReason = AcceptFailReason | "own_request";
 export type AcceptResult = AcceptOk | { ok: false; reason: AcceptFailReason };
 export type ClaimResult = AcceptOk | { ok: false; reason: ClaimFailReason };
@@ -279,6 +288,7 @@ async function acceptLocked(dispatchId: string, via: Channel): Promise<AcceptRes
   if (!d) return { ok: false, reason: "not_found" };
   const [target, who] = await Promise.all([store.getRequest(d.requestId), store.getHelper(d.helperId)]);
   if (target && !canAccept(who ?? {}, target)) return { ok: false, reason: "tier_required" };
+  if (await isBusyElsewhere(d.helperId, d.requestId)) return { ok: false, reason: "busy" };
   const res = await store.acceptDispatch(dispatchId);
   if (!res.ok) return res;
   const dispatch = via === "sms" ? ((await store.updateDispatch(dispatchId, { channel: "sms" })) as Dispatch) : res.dispatch;
@@ -307,6 +317,7 @@ export async function claim(requestId: string, helperId: string): Promise<ClaimR
     if (r.status !== "searching" && r.status !== "escalated") return { ok: false as const, reason: "already_matched" as const };
     // Checked before a dispatch is created, so a refused claim leaves no trace and the request keeps searching.
     if (!canAccept((await store.getHelper(helperId)) ?? {}, r)) return { ok: false as const, reason: "tier_required" as const };
+    if (await isBusyElsewhere(helperId, requestId)) return { ok: false as const, reason: "busy" as const };
     const mine = (await store.listDispatches(requestId)).find((d) => d.helperId === helperId && d.status === "pinged");
     let id = mine?.id;
     if (!id) {

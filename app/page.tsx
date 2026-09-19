@@ -397,6 +397,9 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
         </Container>
       </div>
 
+      {dash.active ? (
+        <JobMode active={dash.active} me={me} simulated={beacon.source !== "gps"} waiting={dash.hiddenWhileBusy} toast={toast} onDismissToast={() => setToast(null)} onDone={done} />
+      ) : (
       <main className="mx-auto grid w-full max-w-6xl flex-1 content-start gap-4 px-4 py-4 md:px-8 lg:grid-cols-[1fr_1.2fr] lg:items-start">
         <div className="flex flex-col gap-4">
           {toast && (
@@ -420,7 +423,6 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
               <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/15"><Icon.AlertTriangle size={30} /></div>
             </button>
           )}
-          {dash.active && <ActiveJob r={dash.active.request} mapsUrl={dash.active.mapsUrl} me={me.location} simulated={beacon.source !== "gps"} onDone={done} />}
           <WalletCard me={me} onProfile={onProfile} />
           <section className="card-shadow rounded-2xl border border-slate-100 bg-white p-4">
             <div className="mb-2 flex items-center justify-between"><h2 className="font-display font-semibold text-resq-navy">What you can offer</h2><button onClick={onProfile} className="min-h-10 px-2 text-sm font-semibold text-resq-cyan">Edit</button></div>
@@ -461,6 +463,7 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
           </div>
         </section>
       </main>
+      )}
       {open && <RequestSheet f={open} me={me} onClose={() => setOpen(null)} onAccept={() => accept(open)} onDecline={() => notNow(open)} />}
       <Call112Bar />
     </>
@@ -809,5 +812,46 @@ function AskForm({ me, center, onBack, onCreated }: { me: Helper; center: LatLng
       </main>
       <Call112Bar />
     </>
+  );
+}
+
+// ─── On a job: only the requester's details; other requests wait in a locked tab ───────────────────────────
+
+function JobMode({ active, me, simulated, waiting, toast, onDismissToast, onDone }: {
+  active: NonNullable<Dashboard["active"]>; me: Helper; simulated: boolean; waiting: number; toast: string | null; onDismissToast: () => void; onDone: () => void;
+}) {
+  const [tab, setTab] = useState<"job" | "others">("job");
+  return (
+    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-4 md:px-8">
+      <div role="tablist" aria-label="Your work" className="mb-4 grid grid-cols-2 gap-1 rounded-2xl bg-slate-200/70 p-1">
+        <button role="tab" aria-selected={tab === "job"} onClick={() => setTab("job")}
+          className={`min-h-12 rounded-xl text-sm font-semibold ${tab === "job" ? "bg-white text-resq-navy shadow" : "text-resq-slate"}`}>
+          Current job
+        </button>
+        <button role="tab" aria-selected={tab === "others"} onClick={() => setTab("others")}
+          className={`flex min-h-12 items-center justify-center gap-2 rounded-xl text-sm font-semibold ${tab === "others" ? "bg-white text-resq-navy shadow" : "text-resq-slate"}`}>
+          Other requests
+          <span className="rounded-full bg-slate-300/80 px-2 py-0.5 text-xs text-resq-navy">{waiting}</span>
+        </button>
+      </div>
+      {toast && (
+        <div className="animate-fade-in mb-4 flex items-center gap-2 rounded-2xl bg-resq-navy px-4 py-3 text-sm font-semibold text-white">
+          <Icon.Check size={16} />{toast}<button onClick={onDismissToast} aria-label="Dismiss" className="ml-auto flex h-9 w-9 items-center justify-center"><Icon.X size={16} /></button>
+        </div>
+      )}
+      {tab === "job" ? (
+        <ActiveJob r={active.request} mapsUrl={active.mapsUrl} me={me.location} simulated={simulated} onDone={onDone} />
+      ) : (
+        <section className="card-shadow rounded-2xl border border-slate-100 bg-white p-6 text-center">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100"><Icon.Clock size={26} className="text-resq-slate" /></div>
+          <p className="font-display text-lg font-bold text-resq-navy">Finish your current job first</p>
+          <p className="mt-1 text-sm text-resq-slate">
+            {waiting > 0 ? `${waiting} request${waiting > 1 ? "s" : ""} matching your skills ${waiting > 1 ? "are" : "is"} waiting nearby.` : "No other matching requests nearby right now."}
+            {" "}They appear here, with alerts, as soon as you tap <strong>Mark as done</strong>. Until then nobody else can assign you a new job.
+          </p>
+          <button onClick={() => setTab("job")} className="mt-4 min-h-12 w-full rounded-xl bg-resq-navy font-semibold text-white">Back to {active.request.requesterName ?? "the requester"}</button>
+        </section>
+      )}
+    </main>
   );
 }

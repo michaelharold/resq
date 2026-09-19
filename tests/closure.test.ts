@@ -45,3 +45,17 @@ test("cancel: pinged helpers are told it was cancelled", async () => {
   const t = recentSms().filter((m) => /cancelled\. No action needed/.test(m.body));
   assert.ok(t.length >= 3);
 });
+
+test("one job at a time: a helper on a job is not pinged for new requests and cannot take a second one", async () => {
+  const r1 = await setup();
+  assert.equal((await claim(r1.id, "a")).ok, true);
+  const r2 = await createHelpRequest({ requesterId: "test-uid-closure-2", requesterPhone: null, requesterHelperId: null,
+    description: "deep cut bleeding a lot", location: C, locationSource: "gps", landmark: null, channel: "app" });
+  const pinged = (await getStore().listDispatches(r2.id)).map((d) => d.helperId);
+  assert.ok(!pinged.includes("a"), "busy helper is not pinged");
+  const second = await claim(r2.id, "a");
+  assert.equal(second.ok, false);
+  assert.equal(second.ok ? null : second.reason, "busy");
+  assert.equal((await resolve(r1.id)).ok, true);
+  assert.equal((await claim(r2.id, "a")).ok, true, "after Mark as done they can take the next one");
+});
