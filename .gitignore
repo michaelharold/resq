@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# next.js build output
+.next/
+out/
+.turbo/
+
+# env files (keep .env.example)
+.env.local
+.env*.local
+
+# logs
+*.log
+npm-debug.log*
+
+# misc
+.DS_Store
+*.tsbuildinfo
+.test-dist/
