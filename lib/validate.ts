@@ -102,6 +102,21 @@ export function trustOf(b: Record<string, unknown>, existing: { trustTier?: Trus
   return { ok: true, value: { trustTier, credentialId } };
 }
 
+/** { plumber: { min, max }, … } — every key must be one of the provider's skills; whole rupees 0–1,00,000, min ≤ max. */
+export function ratesOf(x: unknown, skills: Skill[]): { ok: true; value: Partial<Record<Skill, { min: number; max: number }>> } | { ok: false } {
+  if (x === undefined || x === null) return { ok: true, value: {} };
+  if (typeof x !== "object" || Array.isArray(x)) return { ok: false };
+  const out: Partial<Record<Skill, { min: number; max: number }>> = {};
+  for (const [k, v] of Object.entries(x as Record<string, unknown>)) {
+    if (!isSkill(k) || !skills.includes(k)) return { ok: false };
+    const { min, max } = (v ?? {}) as Record<string, unknown>;
+    const ok = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 100_000;
+    if (!ok(min) || !ok(max) || min > max) return { ok: false };
+    out[k] = { min, max };
+  }
+  return { ok: true, value: out };
+}
+
 export async function readJson(req: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
   try {
     const raw = await req.text();

@@ -36,6 +36,8 @@ export type Helper = {
   credentialId?: string | null; // licence / registration number given for Tier 2 / Tier 3 (self-declared in the demo)
   walletBalance?: number;       // read via walletOf() — credited when escrow is released
   availabilityPausedAt?: string | null; // set when availability was switched off automatically because this person asked for help
+  rates?: Partial<Record<Skill, RateRange>>; // what the provider charges per service (₹, shown to people requesting it)
+  idProof?: IdProof | null;                  // uploaded identity document and its verification status
   profile?: UserProfile;   // basic details collected at sign-up
 };
 
@@ -62,7 +64,7 @@ export type TriageResult = {
 export type HazardAlert = { hasHazard: boolean; kind: HazardKind; hazardTitle: string | null; hazardAction: string | null };
 
 // ─── Upgrade: monetization, trust tiers ──────────────────────────────────────────────────────────────────────
-export type RequestCategory = "LIFE_SAFETY" | "HOUSEHOLD_MICROGIG";
+export type RequestCategory = "LIFE_SAFETY" | "HOUSEHOLD_MICROGIG" | "SERVICE";
 export type EscrowStatus = "HELD" | "RELEASED" | "REFUNDED";
 export type GigType = "plumbing" | "electrical" | "generator_power" | "other_repair";
 export type TrustTier = "TIER_1_NEIGHBOR" | "TIER_2_CERTIFIED_PRO" | "TIER_3_FIRST_RESPONDER";
@@ -93,6 +95,8 @@ export type HelpRequest = {
   upgradedToLifeSafety?: boolean;      // filed as a paid job but converted to a free emergency by the safety override
   fallbackAt?: string | null;          // when the 3-minute / all-waves fallback fired (LIFE_SAFETY)
   emergencyContactNotifiedAt?: string | null; // when the requester's emergency contact was texted
+  service?: Skill | null;               // SERVICE requests: the service the user tapped (plumber, electrician, doctor…)
+  paymentStatus?: "due" | "paid" | null; // SERVICE requests after completion (in-app payment is a placeholder for now)
   triage: TriageResult | null;
   status: RequestStatus;
   wave: number; // 0 before dispatch starts, 1..4 while searching
@@ -144,7 +148,7 @@ export type DispatchPublic = Pick<Dispatch, "id" | "wave" | "status" | "distance
 };
 
 /** The matched helper as shown to the requester; distanceKm = the accepted dispatch's distanceKm. */
-export type HelperPublic = Pick<Helper, "id" | "name" | "skills" | "phone" | "location" | "reliability" | "equipment"> & { distanceKm: number | null; trustTier: TrustTier };
+export type HelperPublic = Pick<Helper, "id" | "name" | "skills" | "phone" | "location" | "reliability" | "equipment"> & { distanceKm: number | null; trustTier: TrustTier; verified: boolean; rate: RateRange | null };
 
 /** GET /api/requests/:id, POST .../tick, requester SSE snapshot. */
 export type RequestView = {
@@ -192,3 +196,11 @@ export type Zone = { id: string; name: string; kind: ZoneKind; center: LatLng; r
 export type AuthorityRole = "admin" | "officer";
 export type Authority = { username: string; name: string; role: AuthorityRole; passwordHash: string; createdAt: string };
 export type AuditEntry = { at: string; user: string; action: string; detail: string };
+
+// ─── Community services marketplace ──────────────────────────────────────────────────────────────────────────
+export type RateRange = { min: number; max: number };
+export type VerificationStatus = "pending" | "verified" | "rejected";
+export type IdProof = {
+  fileId: string | null; fileName: string; mime: string; size: number; uploadedAt: string;
+  status: VerificationStatus; reviewedBy: string | null; reviewedAt: string | null; note: string | null;
+};

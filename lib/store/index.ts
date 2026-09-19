@@ -54,7 +54,7 @@ function createStore(): Store {
   const jsonPath = f === "off" ? null : f || `${process.cwd()}/.data/accounts.json`;
   const mongo = process.env.MONGODB_URI?.trim();
   // MongoDB holds registered users when configured (first start imports the JSON file); otherwise the JSON file.
-  const persistence = mongo ? new MongoPersistence(mongo, process.env.MONGODB_DB?.trim() || "resq", jsonPath) : jsonPath ? new JsonFilePersistence(jsonPath) : null;
+  const persistence = mongo ? new MongoPersistence(process.env.MONGODB_DB?.trim() || "resq", jsonPath) : jsonPath ? new JsonFilePersistence(jsonPath) : null;
   return new MemoryStore({ persistence });
 }
 

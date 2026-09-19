@@ -47,9 +47,13 @@ export const tierOf = (h: Pick<Helper, "trustTier"> | null | undefined): TrustTi
 export const walletOf = (h: Pick<Helper, "walletBalance"> | null | undefined): number => h?.walletBalance ?? 0;
 /** Paid household jobs may only be accepted by Certified Pros; free life-safety requests by anyone. */
 export const REQUIRED_TIER_FOR_GIG: TrustTier = "TIER_2_CERTIFIED_PRO";
-export function canAccept(h: Pick<Helper, "trustTier">, r: Pick<HelpRequest, "category">): boolean {
-  return categoryOf(r) === "LIFE_SAFETY" || tierOf(h) === REQUIRED_TIER_FOR_GIG;
+export function canAccept(h: Pick<Helper, "trustTier"> & Partial<Pick<Helper, "skills">>, r: Pick<HelpRequest, "category"> & Partial<Pick<HelpRequest, "service">>): boolean {
+  const cat = categoryOf(r);
+  if (cat === "SERVICE") return !!r.service && (h.skills ?? []).includes(r.service); // only providers of that service
+  return cat === "LIFE_SAFETY" || tierOf(h) === REQUIRED_TIER_FOR_GIG;
 }
+export const isVerified = (h: Pick<Helper, "idProof"> | null | undefined): boolean => h?.idProof?.status === "verified";
+export const rateFor = (h: Pick<Helper, "rates"> | null | undefined, s: Skill | null | undefined) => (s && h?.rates?.[s]) || null;
 
 // ── 3-minute smart fallback (LIFE_SAFETY only) ───────────────────────────────────────────────────────────────
 export function fallbackMs(): number {

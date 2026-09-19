@@ -15,6 +15,7 @@ export const POST = safe(async (req: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const r = await claim(id, s.helperId);
   if (r.ok) return json(r);
+  if (r.reason === "service_mismatch") return json({ ok: false, reason: r.reason, error: r.reason, detail: "You don't offer this service." }, 403);
   if (r.reason === "tier_required") return json({ ok: false, reason: r.reason, error: r.reason, requiredTier: REQUIRED_TIER_FOR_GIG }, 403);
   return json({ ok: false, reason: r.reason, error: r.reason }, r.reason === "not_found" ? 404 : 409);
 });

@@ -54,7 +54,7 @@ function Login({ onDone }: { onDone: () => void }) {
   );
 }
 
-type Tab = "dispatch" | "zones" | "team";
+type Tab = "dispatch" | "verify" | "team";
 function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   const { data, connected, refresh } = useSnapshot<Ops>("/api/ops/stream", "/api/ops/requests");
   const [selected, setSelected] = useState<string | null>(null);
@@ -83,7 +83,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         : data.dispatches.some((d) => d.helperId === h.id && d.status === "pinged") ? "#D97706" : undefined,
     })),
     ...data.requests.filter((r) => r.location).map((r) => ({
-      id: r.id, at: r.location!, kind: "request" as const, color: STATUS_COLOR[r.status], label: `${r.triage ? TYPE_LABELS[r.triage.type] : "Request"} · ${r.status}`,
+      id: r.id, at: r.location!, kind: "request" as const, color: STATUS_COLOR[r.status], label: `${r.service ? SKILL_META[r.service].label : r.triage ? TYPE_LABELS[r.triage.type] : "Request"} · ${r.status}`,
     })),
   ];
   const sel = data.requests.find((r) => r.id === selected) ?? null;
@@ -94,7 +94,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-resq-red"><Logo size={24} /></div>
-            <div><h1 className="font-display text-xl font-bold text-white">ResQ Coordinator</h1><p className="text-xs text-white/60">Live community response</p></div>
+            <div><h1 className="font-display text-xl font-bold text-white">ResQ Admin</h1><p className="text-xs text-white/60">Live requests · ID verification</p></div>
           </div>
           <div className="ml-auto flex flex-wrap gap-2">
             {[
@@ -116,13 +116,13 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
           </div>
         </div>
         <nav className="mx-auto mt-4 flex max-w-7xl gap-1" aria-label="Sections">
-          {([["dispatch", "Live dispatch"], ["zones", "Disaster zones"], ["team", "Team & audit"]] as const).map(([id, label]) => (
+          {([["dispatch", "Live requests"], ["verify", "ID verification"], ["team", "Team & audit"]] as const).map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} aria-current={tab === id ? "page" : undefined}
               className={`min-h-10 rounded-xl px-4 text-sm font-semibold ${tab === id ? "bg-white text-resq-navy" : "text-white/70 hover:text-white"}`}>{label}</button>
           ))}
         </nav>
       </header>
-      {tab === "zones" && <ZonesTab center={data.center} />}
+      {tab === "verify" && <VerifyTab />}
       {tab === "team" && <TeamTab isAdmin={me?.role === "admin"} />}
 
       <main className={`mx-auto grid max-w-7xl gap-4 p-4 lg:grid-cols-[1.4fr_1fr] ${tab === "dispatch" ? "" : "hidden"}`}>
@@ -216,7 +216,7 @@ function RequestRow({ r, data, onSelect, selected }: { r: HelpRequest; data: Ops
     <button onClick={() => onSelect(r.id)} className={`w-full rounded-xl border p-3 text-left transition-colors ${selected ? "border-resq-navy bg-slate-50" : "border-slate-100 hover:bg-slate-50"}`}>
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_COLOR[r.status] }} />
-        <span className="text-sm font-semibold text-resq-navy">{r.triage ? TYPE_LABELS[r.triage.type] : "Triaging…"}</span>
+        <span className="text-sm font-semibold text-resq-navy">{r.service ? SKILL_META[r.service].label : r.triage ? TYPE_LABELS[r.triage.type] : "Triaging…"}</span>
         {r.triage && <span className={`rounded px-1.5 text-[10px] font-bold uppercase ${URGENCY_STYLE[r.triage.urgency]}`}>{r.triage.urgency}</span>}
         {r.channel === "sms" && <Badge variant="warning">SMS-in</Badge>}
         {!r.location && <Badge variant="emergency">No location</Badge>}
@@ -563,6 +563,79 @@ function TeamTab({ isAdmin }: { isAdmin: boolean }) {
             </div>
           ))}
         </div>
+      </section>
+    </main>
+  );
+}
+
+// ─── ID verification ───────────────────────────────────────────────────────────────────────────────────────
+
+type VerifyPerson = { id: string; name: string; phone: string; skills: string[]; rates: Record<string, { min: number; max: number }>;
+  profile: { address: string | null } | null; idProof: { fileName: string; mime: string; size: number; uploadedAt: string; status: "pending" | "verified" | "rejected"; reviewedBy: string | null; reviewedAt: string | null; note: string | null } };
+
+function VerifyTab() {
+  const [people, setPeople] = useState<VerifyPerson[] | null>(null);
+  const [sel, setSel] = useState<string | null>(null);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = async () => { const r = await api<{ people: VerifyPerson[] }>("/api/ops/verifications"); if (r.ok) setPeople(r.data.people); };
+  useEffect(() => { void load(); const t = setInterval(load, 10_000); return () => clearInterval(t); }, []);
+  const p = people?.find((x) => x.id === sel) ?? null;
+  const decide = async (decision: "verified" | "rejected") => {
+    if (!p) return;
+    setBusy(true);
+    await api(`/api/ops/verifications/${p.id}`, { body: { decision, note } });
+    setBusy(false); setNote(""); await load();
+  };
+  const chip = (s: string) => s === "verified" ? "bg-resq-green-light text-resq-green" : s === "rejected" ? "bg-resq-red-light text-resq-red" : "bg-amber-50 text-amber-700";
+  return (
+    <main className="mx-auto grid max-w-7xl gap-4 p-4 lg:grid-cols-[1fr_1.3fr]">
+      <section className="card-shadow rounded-2xl bg-white p-4">
+        <h2 className="mb-1 font-display font-semibold text-resq-navy">ID proofs</h2>
+        <p className="mb-3 text-xs text-resq-slate">Pending first. Approving gives the provider the “ID verified” badge; they are told by SMS either way.</p>
+        {people === null && <p className="text-sm text-resq-slate">Loading…</p>}
+        {people?.length === 0 && <p className="text-sm text-resq-slate">No ID proofs uploaded yet.</p>}
+        <div className="space-y-2">
+          {people?.map((x) => (
+            <button key={x.id} onClick={() => { setSel(x.id); setNote(""); }} className={`w-full rounded-xl border p-3 text-left ${sel === x.id ? "border-resq-navy bg-slate-50" : "border-slate-100 hover:bg-slate-50"}`}>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-resq-navy">{x.name}</span>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${chip(x.idProof.status)}`}>{x.idProof.status}</span>
+                <span className="ml-auto text-xs text-resq-slate">{fmtTime(x.idProof.uploadedAt)}</span>
+              </div>
+              <p className="mt-0.5 text-xs text-resq-slate">{x.phone} · {x.skills.filter((s) => SKILL_META[s as keyof typeof SKILL_META]).map((s) => SKILL_META[s as keyof typeof SKILL_META].label).join(", ") || "no services"}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="card-shadow rounded-2xl bg-white p-4">
+        {!p ? <p className="p-6 text-center text-sm text-resq-slate">Select a person to review their document.</p> : (
+          <>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h2 className="font-display text-lg font-bold text-resq-navy">{p.name}</h2>
+                <p className="text-xs text-resq-slate">{p.phone}{p.profile?.address ? ` · ${p.profile.address}` : ""}</p>
+              </div>
+              <a href={`/api/ops/verifications/${p.id}`} target="_blank" rel="noopener noreferrer" className="min-h-10 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-resq-navy">Open in new tab</a>
+            </div>
+            <ul className="mt-2 flex flex-wrap gap-2 text-xs">
+              {Object.entries(p.rates).map(([s, r]) => <li key={s} className="rounded-lg bg-slate-100 px-2 py-1 text-resq-navy">{SKILL_META[s as keyof typeof SKILL_META]?.label ?? s}: ₹{r.min}–₹{r.max}</li>)}
+            </ul>
+            <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+              {p.idProof.mime === "application/pdf"
+                ? <iframe title="ID proof" src={`/api/ops/verifications/${p.id}`} className="h-[420px] w-full" />
+                // eslint-disable-next-line @next/next/no-img-element
+                : <img alt={`ID proof of ${p.name}`} src={`/api/ops/verifications/${p.id}`} className="max-h-[420px] w-full object-contain" />}
+            </div>
+            <p className="mt-2 text-xs text-resq-slate">{p.idProof.fileName} · {(p.idProof.size / 1024).toFixed(0)} KB{p.idProof.reviewedBy ? ` · last reviewed by ${p.idProof.reviewedBy}` : ""}{p.idProof.note ? ` · note: ${p.idProof.note}` : ""}</p>
+            <label className="mt-3 block text-sm font-semibold text-resq-navy">Note to the person <span className="font-normal text-resq-slate">(optional, sent with a rejection)</span>
+              <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} placeholder="e.g. Photo is blurred, please re-upload" className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-normal" /></label>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button disabled={busy} onClick={() => decide("verified")} className="min-h-12 rounded-xl bg-resq-green font-semibold text-white disabled:opacity-60">Approve · verified</button>
+              <button disabled={busy} onClick={() => decide("rejected")} className="min-h-12 rounded-xl border-2 border-resq-red/40 bg-resq-red-light font-semibold text-resq-red disabled:opacity-60">Reject</button>
+            </div>
+          </>
+        )}
       </section>
     </main>
   );

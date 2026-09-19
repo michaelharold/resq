@@ -382,27 +382,6 @@ test("emergency-contact SMS never exceeds 160 characters", () => {
 
 // ── feed, validators, seed ──────────────────────────────────────────────────────────────────────────────────────
 
-test("feed: micro-gigs are hidden from people who cannot accept them; equipment the situation calls for counts", async () => {
-  await fresh([h("plumber-t2", 0.5, ["plumber"], { trustTier: T2, credentialId: "PL-778" }), h("plumber-t1", 0.2, ["plumber"]),
-    h("sparky-t2-pump", 0.3, ["electrician"], { trustTier: T2, credentialId: "EL-101", equipment: ["water_pump"] }),
-    h("pump-owner", 0.4, ["counselor"], { equipment: ["water_pump"] })]);
-  const job = await gig();
-  const pro = await buildDashboard("plumber-t2", "+910");
-  assert.deepEqual(pro.feed.map((f) => f.request.id), [job.id]);
-  assert.deepEqual(pro.feed[0].matchedSkills, ["plumber"]);
-  assert.equal(pro.feed[0].picked, true);
-  const t1 = await buildDashboard("plumber-t1", "+910");
-  assert.deepEqual([t1.feed.length, t1.otherNearby], [0, 0], "hidden, not even counted");
-  const sparky = await buildDashboard("sparky-t2-pump", "+910");
-  assert.deepEqual([sparky.feed.length, sparky.otherNearby], [0, 1], "a pump alone does not make a paid plumbing job relevant");
-
-  const flood = await seeded(triageOf({ equipment: ["water_pump"] }));
-  const owner = await buildDashboard("pump-owner", "+910");
-  assert.deepEqual(owner.feed.map((f) => f.request.id), [flood.id]);
-  assert.deepEqual(owner.feed[0].matchedEquipment, ["water_pump"]);
-  assert.deepEqual(owner.feed[0].matchedSkills, []);
-});
-
 test("validators: pricingOf and trustOf", () => {
   assert.deepEqual(pricingOf({}), { ok: true, value: { category: "LIFE_SAFETY", gigType: null, calloutFee: 0 } });
   assert.deepEqual(pricingOf({ category: "LIFE_SAFETY", gigType: "plumbing", calloutFee: 500 }), { ok: true, value: { category: "LIFE_SAFETY", gigType: null, calloutFee: 0 } });

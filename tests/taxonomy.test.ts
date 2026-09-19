@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { SKILLS, NEED_TYPES, TYPE_SKILLS, isSkill, isNeedType, isUrgency } from "../lib/taxonomy";
 
 test("taxonomy sizes match README §4", () => {
-  assert.equal(SKILLS.length, 11);
+  assert.equal(SKILLS.length, 18);
   assert.equal(NEED_TYPES.length, 12);
 });
 

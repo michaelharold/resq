@@ -5,7 +5,7 @@ import { Badge } from "./ui";
 import { LiveMap, type MapMarker } from "./LiveMap";
 import { HazardBanner } from "./HazardBanner";
 import { fmtDistance, distanceKm, type LatLng } from "@/lib/client/api";
-import { TYPE_LABELS } from "@/lib/taxonomy";
+import { TYPE_LABELS, SKILL_LABELS } from "@/lib/taxonomy";
 import { GIG_TYPES, categoryOf, feeOf, formatMoney } from "@/lib/policy";
 import type { HelpRequest } from "@/lib/types";
 
@@ -35,14 +35,15 @@ export function ActiveJob({ r, mapsUrl, me, simulated, onDone }: { r: HelpReques
   if (me) markers.push({ id: "me", at: me, color: "#16A34A", kind: "you", label: "You", pulse: false });
   const gig = categoryOf(r) === "HOUSEHOLD_MICROGIG";
   const gigLabel = gig ? (r.gigType ? GIG_TYPES[r.gigType].label : "Household job") : null;
+  const service = categoryOf(r) === "SERVICE" && r.service ? SKILL_LABELS[r.service] : null;
   return (
     <section className="card-shadow-lg animate-slide-up overflow-hidden rounded-2xl border-2 border-resq-green bg-white">
       <div className="bg-success-gradient px-5 py-4">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="success">You are helping</Badge>
-          {gig ? <Badge variant="warning">Paid job · {gigLabel}</Badge> : <Badge variant="default">Free · life safety</Badge>}
+          <Badge variant="success">Your current job</Badge>
+          {service ? <Badge variant="default">{service}</Badge> : gig ? <Badge variant="warning">Paid job · {gigLabel}</Badge> : <Badge variant="default">Free · life safety</Badge>}
         </div>
-        <h2 className="mt-2 font-display text-xl font-bold text-white">{gig ? gigLabel : r.triage ? TYPE_LABELS[r.triage.type] : "Emergency"} · {r.requesterName ?? "Requester"}</h2>
+        <h2 className="mt-2 font-display text-xl font-bold text-white">{service ?? (gig ? gigLabel : r.triage ? TYPE_LABELS[r.triage.type] : "Emergency")} · {r.requesterName ?? "Customer"}</h2>
         <p className="text-sm text-white/80">{arrived ? "You have arrived" : dist !== null ? `${fmtDistance(dist)} away${simulated ? " · simulated travel" : " · live GPS"}` : "Location not shared"}</p>
       </div>
       <div className="space-y-3 p-4">

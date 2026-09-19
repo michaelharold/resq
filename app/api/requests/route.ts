@@ -2,7 +2,8 @@ import { getHelperSession, getRequesterId } from "@/lib/auth";
 import { isLatLng, json, jsonError, pricingOf, readJson, safe, text } from "@/lib/validate";
 import { normalizePhone } from "@/lib/sms";
 import { getStore } from "@/lib/store";
-import { createHelpRequest, onReject } from "@/lib/waves";
+import { createHelpRequest, createServiceRequest, onReject } from "@/lib/waves";
+import { MEDICAL_SERVICES, isService } from "@/lib/taxonomy";
 import { emit } from "@/lib/events";
 import { buildRequestView } from "@/lib/views";
 
@@ -31,6 +32,18 @@ export const POST = safe(async (req: Request) => {
   const role = body.value.role;
   if (role !== undefined && role !== "self" && role !== "other") return jsonError(400, "role_invalid");
   const b = body.value;
+  // Community services (the main flow): the user tapped a service and described the problem.
+  if (b.service !== undefined) {
+    if (!isService(b.service)) return jsonError(400, "service_invalid");
+    if (!account) return jsonError(401, "unauthenticated", { detail: "Sign in to request a service." });
+    // Asking a doctor/nurse/caregiver for yourself means you are not free to help others right now.
+    if (MEDICAL_SERVICES.includes(b.service) && account.onDuty) {
+      const paused = await getStore().upsertHelper({ ...account, onDuty: false, availabilityPausedAt: new Date().toISOString() });
+      emit("helper:updated", { helper: paused });
+    }
+    const svc = await createServiceRequest({ service: b.service, description, location, account });
+    return json(await buildRequestView(svc.id), 201);
+  }
   const requesterName = b.name === undefined || b.name === "" ? null : text(b.name, 60);
   if (requesterName === null && b.name !== undefined && b.name !== "") return jsonError(400, "name_invalid");
   const requesterPhone = b.phone === undefined || b.phone === "" ? null : normalizePhone(b.phone);

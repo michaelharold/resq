@@ -8,6 +8,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { AuditEntry, Authority, Helper, UserLocation, Zone } from "../types";
+import { getDb } from "../mongo";
 
 export type Snapshot = { helpers: Helper[]; locations: UserLocation[]; zones: Zone[]; authorities: Authority[]; audit: AuditEntry[] };
 export type Changes = {
@@ -42,25 +43,21 @@ const point = (p: { lat: number; lng: number } | null | undefined) => (p ? { typ
 
 export class MongoPersistence implements Persistence {
   readonly name: string;
-  private dbp: Promise<import("mongodb").Db> | null = null;
-  constructor(private uri: string, private dbName: string, private importFrom: string | null) { this.name = `MongoDB ${dbName}`; }
+  constructor(private dbName: string, private importFrom: string | null) { this.name = `MongoDB ${dbName}`; }
 
-  private db() {
-    this.dbp ??= (async () => {
-      const { MongoClient } = await import("mongodb");
-      const client = new MongoClient(this.uri, { serverSelectionTimeoutMS: 5000, appName: "resq" });
-      await client.connect();
-      const db = client.db(this.dbName);
-      await Promise.all([
-        db.collection("users").createIndex({ phone: 1 }, { unique: true, name: "phone_unique" }),
-        db.collection("users").createIndex({ geo: "2dsphere" }, { name: "users_geo", sparse: true }),
-        db.collection("user_locations").createIndex({ geo: "2dsphere" }, { name: "locations_geo" }),
-        db.collection("user_locations").createIndex({ updatedAt: -1 }, { name: "locations_recent" }),
-        db.collection("audit_log").createIndex({ at: -1 }, { name: "audit_recent" }),
-      ]);
-      return db;
-    })();
-    return this.dbp;
+  private indexed: Promise<void> | null = null;
+  private async db() {
+    const db = await getDb();
+    this.indexed ??= Promise.all([
+      db.collection("users").createIndex({ phone: 1 }, { unique: true, name: "phone_unique" }),
+      db.collection("users").createIndex({ geo: "2dsphere" }, { name: "users_geo", sparse: true }),
+      db.collection("users").createIndex({ skills: 1 }, { name: "users_skills" }),
+      db.collection("user_locations").createIndex({ geo: "2dsphere" }, { name: "locations_geo" }),
+      db.collection("user_locations").createIndex({ updatedAt: -1 }, { name: "locations_recent" }),
+      db.collection("audit_log").createIndex({ at: -1 }, { name: "audit_recent" }),
+    ]).then(() => undefined);
+    await this.indexed;
+    return db;
   }
 
   async load(): Promise<Partial<Snapshot> | null> {

@@ -65,3 +65,7 @@ export const tplHelperAccepted = (i: { mapsUrl: string | null; phone: string | n
 /** Sent to helpers who were pinged but did not take the job, once the request is closed. */
 export const tplRequestClosed = (i: { typeLabel: string; outcome: "resolved" | "cancelled" }) =>
   `RESQ: The ${i.typeLabel} request near you has been ${i.outcome === "resolved" ? "resolved" : "cancelled"}. No action needed. Thank you.`;
+
+/** New service request near a provider (they accept in the app). */
+export const tplServiceRequest = (i: { service: Skill; distanceKm: number }) =>
+  `RESQ: New ${SKILL_LABELS[i.service]} request ${formatDistance(i.distanceKm)} from you. Open the ResQ app to see details and accept.`;

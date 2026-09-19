@@ -6,19 +6,17 @@
  */
 import { randomUUID } from "node:crypto";
 import { emit } from "./events";
+import { NO_HAZARD } from "./hazards";
 import { getStore } from "./store";
 import { MAX_WAVES, TICK_GRACE_MS, WAVE_RADII_KM, haversineKm, selectWave, waveWindowMs } from "./dispatch";
-import { formatDistance, mapsUrl, sendSms, tplPing, tplRequesterEscalated, tplRequesterMatched, tplRequestClosed } from "./sms";
+import { formatDistance, mapsUrl, sendSms, tplPing, tplRequesterEscalated, tplRequesterMatched, tplRequestClosed, tplServiceRequest } from "./sms";
 import { triage } from "./triage";
 import { inferRole } from "./role";
 import { releaseEscrowLocked, withHelperLock, type EscrowRelease } from "./escrow";
 import { GIG_TYPES, REQUIRED_TIER_FOR_GIG, canAccept, categoryOf, fallbackMs, feeOf, isCalloutFee, mustBeLifeSafety } from "./policy";
 import { isKnownGigType } from "./validate";
 import { EQUIPMENT_LABELS, SKILL_LABELS, TYPE_SMS_LABELS } from "./taxonomy";
-import type {
-  Channel, Dispatch, Equipment, GigType, Helper, HelpRequest, LatLng, LocationSource, NeedType, RequestCategory, RequesterRole,
-  StoreErrorReason, TriageResult, Urgency, UserProfile,
-} from "./types";
+import type { Channel, Dispatch, Equipment, GigType, Helper, HelpRequest, LatLng, LocationSource, NeedType, RequestCategory, RequesterRole, StoreErrorReason, TriageResult, Urgency, UserProfile, Skill } from "./types";
 
 const g = globalThis as unknown as { __resq_locks?: Map<string, Promise<unknown>> };
 const locks = (g.__resq_locks ??= new Map());
@@ -183,6 +181,47 @@ function gigTriage(t: TriageResult, gigType: GigType): TriageResult {
   return { ...t, skills: [...gig.skills], equipment: [...new Set([...gig.equipment, ...(t.equipment ?? [])])].slice(0, 4), urgency: capUrgency(t.urgency) };
 }
 
+// ─── Community services (the marketplace flow) ──────────────────────────────────────────────────────────────
+
+export const SERVICE_RADIUS_KM = 10;
+export type ServiceRequestInput = {
+  service: Skill; description: string; location: LatLng | null; account: Helper;
+};
+
+/**
+ * A user tapped a service (plumber, electrician, doctor…) and described the problem. The request is broadcast to
+ * every available provider of that service within SERVICE_RADIUS_KM (their dashboard updates live; the nearest 10
+ * also get an SMS). It stays open until one of them accepts: no waves, no escalation.
+ */
+export async function createServiceRequest(input: ServiceRequestInput): Promise<HelpRequest> {
+  const store = getStore();
+  const now = nowIso();
+  const medical = input.service === "doctor" || input.service === "nurse" || input.service === "caregiver";
+  const triageResult: TriageResult = {
+    type: "other", urgency: medical ? "high" : "medium", skills: [input.service],
+    summary: input.description.slice(0, 140), confidence: 1, source: "rules", clarifyingQuestion: null, equipment: [], hazardAlert: NO_HAZARD,
+  };
+  const request = await store.createRequest({
+    id: randomUUID(), requesterId: `acct:${input.account.id}`, requesterPhone: input.account.phone, requesterHelperId: input.account.id,
+    requesterName: input.account.name, requesterProfile: input.account.profile ?? null, role: "self",
+    description: input.description, location: input.location, locationSource: input.location ? "gps" : "none", landmark: null, channel: "app",
+    triage: triageResult, status: "searching", wave: 1, radiusKm: SERVICE_RADIUS_KM, waveStartedAt: now, matchedHelperId: null,
+    createdAt: now, updatedAt: now, category: "SERVICE", service: input.service, gigType: null, calloutFee: 0, escrowStatus: null,
+    upgradedToLifeSafety: false, fallbackAt: null, emergencyContactNotifiedAt: null, paymentStatus: null,
+  });
+  emit("request:updated", { request });
+  if (input.location) {
+    const providers = (await store.getOnDutyHelpers())
+      .filter((h) => h.id !== input.account.id && h.skills.includes(input.service) && h.location)
+      .map((h) => ({ h, km: haversineKm(input.location!, h.location!) }))
+      .filter((x) => x.km <= SERVICE_RADIUS_KM)
+      .sort((a, b) => a.km - b.km)
+      .slice(0, 10);
+    for (const { h, km } of providers) void sendSms(h.phone, tplServiceRequest({ service: input.service, distanceKm: km }));
+  }
+  return request;
+}
+
 export async function createHelpRequest(input: NewRequestInput): Promise<HelpRequest> {
   const store = getStore();
   const now = nowIso();
@@ -228,6 +267,7 @@ export function tick(id: string): Promise<{ advanced: boolean; request: HelpRequ
     const store = getStore();
     const r = await store.getRequest(id);
     if (!r || r.status !== "searching") return { advanced: false, request: r };
+    if (categoryOf(r) === "SERVICE") return { advanced: false, request: r }; // service requests stay open until accepted
     if (fallbackDue(r)) { // 3-minute smart fallback: escalate at once, even mid-wave
       await expirePinged(id);
       return { advanced: true, request: await escalateLocked(id) };
@@ -272,7 +312,7 @@ export async function busyHelperIds(): Promise<Set<string>> {
 async function isBusyElsewhere(helperId: string, requestId: string): Promise<boolean> {
   return (await getStore().listOpenRequests()).some((r) => r.status === "matched" && r.matchedHelperId === helperId && r.id !== requestId);
 }
-export type ClaimFailReason = AcceptFailReason | "own_request";
+export type ClaimFailReason = AcceptFailReason | "own_request" | "service_mismatch";
 export type AcceptResult = AcceptOk | { ok: false; reason: AcceptFailReason };
 export type ClaimResult = AcceptOk | { ok: false; reason: ClaimFailReason };
 
@@ -316,7 +356,7 @@ export async function claim(requestId: string, helperId: string): Promise<ClaimR
     if (r.requesterHelperId === helperId) return { ok: false as const, reason: "own_request" as const };
     if (r.status !== "searching" && r.status !== "escalated") return { ok: false as const, reason: "already_matched" as const };
     // Checked before a dispatch is created, so a refused claim leaves no trace and the request keeps searching.
-    if (!canAccept((await store.getHelper(helperId)) ?? {}, r)) return { ok: false as const, reason: "tier_required" as const };
+    if (!canAccept((await store.getHelper(helperId)) ?? {}, r)) return { ok: false as const, reason: categoryOf(r) === "SERVICE" ? "service_mismatch" as const : "tier_required" as const };
     if (await isBusyElsewhere(helperId, requestId)) return { ok: false as const, reason: "busy" as const };
     const mine = (await store.listDispatches(requestId)).find((d) => d.helperId === helperId && d.status === "pinged");
     let id = mine?.id;
@@ -391,7 +431,7 @@ export function resolve(id: string): Promise<Simple> {
     const r = await store.getRequest(id);
     if (!r) return { ok: false, reason: "not_found" };
     if (r.status !== "matched") return { ok: false, reason: "conflict" };
-    let request = (await store.updateRequest(id, { status: "resolved" })) as HelpRequest;
+    let request = (await store.updateRequest(id, { status: "resolved", ...(categoryOf(r) === "SERVICE" ? { paymentStatus: "due" as const } : {}) })) as HelpRequest;
     // Mark as done = pay the helper. Same lock, so this and POST /api/incident/payout can never both credit.
     const released = await releaseEscrowLocked(id);
     if (released.ok) request = released.request;
@@ -430,7 +470,7 @@ export function escalate(id: string): Promise<HelpRequest | null> {
 export async function tickDueRequests(): Promise<number> {
   let n = 0;
   for (const r of await getStore().listOpenRequests()) {
-    if (r.status !== "searching") continue;
+    if (r.status !== "searching" || categoryOf(r) === "SERVICE") continue;
     if (!fallbackDue(r) && r.waveStartedAt && Date.now() - Date.parse(r.waveStartedAt) < waveWindowMs() - grace()) continue;
     if ((await tick(r.id)).advanced) n++;
   }

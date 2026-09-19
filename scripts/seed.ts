@@ -14,14 +14,29 @@ const NAMES = ["Anjali Nair", "Faizal Rahman", "Reshma Pillai", "Sreekumar V", "
 
 // 30 skill sets: every skill ≥ 2×, doctor/nurse/swimmer/boat_owner ≥ 3×, nobody holds all of
 // {boat_owner, swimmer, driver_4x4} or all of {swimmer, boat_owner, first_aid}.
+// 30 demo providers for the community-services app: every service is offered by 2–4 people nearby.
 const SKILLSETS: Skill[][] = [
-  ["doctor"], ["nurse", "first_aid"], ["swimmer", "volunteer"], ["boat_owner", "driver_4x4"], ["electrician"],
-  ["plumber", "volunteer"], ["driver_4x4", "first_aid"], ["generator_owner"], ["counselor", "volunteer"], ["doctor", "counselor"],
-  ["nurse"], ["swimmer", "first_aid"], ["boat_owner"], ["electrician", "generator_owner"], ["plumber"],
-  ["volunteer", "driver_4x4"], ["first_aid", "counselor"], ["doctor", "first_aid"], ["nurse", "volunteer"], ["swimmer", "boat_owner"],
-  ["boat_owner", "volunteer"], ["swimmer", "driver_4x4"], ["electrician", "volunteer"], ["generator_owner", "driver_4x4"], ["counselor"],
-  ["plumber", "electrician"], ["doctor", "nurse"], ["first_aid"], ["volunteer"], ["nurse", "counselor"],
+  ["plumber"], ["electrician"], ["carpenter"], ["ac_technician"], ["appliance_repair"], ["painter"], ["cleaner"], ["mechanic"],
+  ["doctor"], ["nurse"], ["caregiver"], ["plumber", "electrician"], ["electrician", "appliance_repair"], ["ac_technician", "appliance_repair"],
+  ["carpenter", "painter"], ["cleaner"], ["mechanic"], ["doctor"], ["nurse", "caregiver"], ["plumber"],
+  ["electrician"], ["carpenter"], ["painter", "cleaner"], ["ac_technician"], ["caregiver"], ["nurse"],
+  ["plumber", "carpenter"], ["appliance_repair"], ["mechanic", "electrician"], ["doctor", "nurse"],
 ];
+/** Typical local rates (₹) per service: [min, max]. Each provider gets a slightly different range. */
+const RATES: Partial<Record<Skill, [number, number]>> = {
+  plumber: [300, 800], electrician: [300, 900], carpenter: [400, 1200], ac_technician: [500, 1500], appliance_repair: [400, 1200],
+  painter: [800, 3000], cleaner: [400, 1500], mechanic: [300, 1000], doctor: [300, 800], nurse: [400, 1000], caregiver: [600, 1500],
+};
+function seedRates(skills: Skill[], i: number): Partial<Record<Skill, { min: number; max: number }>> {
+  const out: Partial<Record<Skill, { min: number; max: number }>> = {};
+  for (const sk of skills) {
+    const r = RATES[sk];
+    if (!r) continue;
+    const bump = ((i * 37) % 5) * 50; // deterministic variety
+    out[sk] = { min: r[0] + bump, max: r[1] + bump * 2 };
+  }
+  return out;
+}
 
 /**
  * Trust tier of a seeded helper (docs/UPGRADE.md §3): doctor / nurse → Tier 3 first responder; electrician / plumber /
@@ -60,12 +75,15 @@ export function seedHelpers(center: LatLng, now: Date): Helper[] {
       name,
       phone: `+9190000000${String(i + 1).padStart(2, "0")}`,
       skills: SKILLSETS[i],
+      rates: seedRates(SKILLSETS[i], i),
       location: { lat: +(center.lat + dLat).toFixed(6), lng: +(center.lng + dLng).toFixed(6) },
       onDuty: true,
-      reliability: +(0.5 + rnd() * 0.15).toFixed(3),
+      reliability: +(0.8 + rnd() * 0.18).toFixed(3), // 4.0–4.9 stars
       lastSeen,
       trustTier,
       credentialId: trustTier === "TIER_1_NEIGHBOR" ? null : `SEED-${String(i + 1).padStart(2, "0")}`, // demo licence number
+      // 4 out of 5 demo providers are ID-verified (no document is stored for seeded people).
+      idProof: i % 5 === 4 ? null : { fileId: null, fileName: "seed", mime: "", size: 0, uploadedAt: lastSeen, status: "verified" as const, reviewedBy: "seed", reviewedAt: lastSeen, note: null },
     };
   });
 }
@@ -110,7 +128,7 @@ async function main(): Promise<void> {
   try {
     for (const h of seedHelpers(center, new Date())) {
       // The whole record is posted, so trustTier + credentialId reach a server that booted before the upgrade.
-      const r = await fetch(`${base}/api/helpers`, { method: "POST", headers, body: JSON.stringify(h) });
+      const r = await fetch(`${base}/api/helpers`, { method: "POST", headers, body: JSON.stringify({ ...h, verified: h.idProof?.status === "verified" }) });
       if (r.ok) { ok++; const t = h.trustTier ?? "TIER_1_NEIGHBOR"; tiers[t] = (tiers[t] ?? 0) + 1; }
       else console.error(`seed: ${h.id} → ${r.status} ${await r.text()}`);
     }

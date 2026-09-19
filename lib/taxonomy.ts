@@ -23,7 +23,27 @@ export const SKILLS = [
   "generator_owner",
   "counselor",
   "volunteer",
+  // Local services (community marketplace)
+  "carpenter",
+  "ac_technician",
+  "appliance_repair",
+  "painter",
+  "cleaner",
+  "mechanic",
+  "caregiver",
 ] as const;
+
+/** Services a user can request with one tap, in display order. Each is also a skill a provider can offer. */
+export const SERVICES = [
+  "plumber", "electrician", "carpenter", "ac_technician", "appliance_repair", "painter",
+  "cleaner", "mechanic", "doctor", "nurse", "caregiver",
+] as const satisfies readonly Skill[];
+export type Service = (typeof SERVICES)[number];
+export function isService(x: unknown): x is Service {
+  return typeof x === "string" && (SERVICES as readonly string[]).includes(x);
+}
+/** Basic medical help: shown with a "call 112 for emergencies" note. */
+export const MEDICAL_SERVICES: readonly Service[] = ["doctor", "nurse", "caregiver"];
 
 export const NEED_TYPES = [
   "flood_rescue",
@@ -75,6 +95,13 @@ export const SKILL_LABELS: Record<Skill, string> = {
   generator_owner: "Generator owner",
   counselor: "Counselor",
   volunteer: "Volunteer",
+  carpenter: "Carpenter",
+  ac_technician: "AC technician",
+  appliance_repair: "Appliance repair",
+  painter: "Painter",
+  cleaner: "Cleaner",
+  mechanic: "Mechanic",
+  caregiver: "Caregiver",
 };
 
 /** Short human labels for need types (triage chip on `/`, lists on `/ops`). */

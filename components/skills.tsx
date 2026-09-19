@@ -14,6 +14,13 @@ export const SKILL_META: Record<Skill, { label: string; desc: string; color: str
   generator_owner: { label: "Generator", desc: "Backup power supply", color: "#D97706", bg: "#FFFBEB", icon: <Icon.Power size={18} /> },
   counselor: { label: "Counselor", desc: "Emotional support", color: "#9333EA", bg: "#FAF5FF", icon: <Icon.MessageSquare size={18} /> },
   volunteer: { label: "Volunteer", desc: "Extra hands on the ground", color: "#1E3A5F", bg: "#EFF6FF", icon: <Icon.User size={18} /> },
+  carpenter: { label: "Carpenter", desc: "Doors, furniture, fittings", color: "#92400E", bg: "#FEF3C7", icon: <Icon.Building size={18} /> },
+  ac_technician: { label: "AC technician", desc: "AC service, gas refill, repair", color: "#0891B2", bg: "#ECFEFF", icon: <Icon.Waves size={18} /> },
+  appliance_repair: { label: "Appliance repair", desc: "Fridge, washing machine, TV", color: "#7C3AED", bg: "#FAF5FF", icon: <Icon.Battery size={18} /> },
+  painter: { label: "Painter", desc: "Walls, touch-ups, waterproofing", color: "#DB2777", bg: "#FDF2F8", icon: <Icon.Star size={18} /> },
+  cleaner: { label: "Cleaner", desc: "Home & deep cleaning", color: "#0D9488", bg: "#F0FDFA", icon: <Icon.Check size={18} /> },
+  mechanic: { label: "Mechanic", desc: "Bike & car repair", color: "#475569", bg: "#F1F5F9", icon: <Icon.Truck size={18} /> },
+  caregiver: { label: "Caregiver", desc: "Elderly & patient care", color: "#E11D48", bg: "#FFF1F2", icon: <Icon.User size={18} /> },
 };
 
 export function SkillPill({ skill }: { skill: Skill }) {

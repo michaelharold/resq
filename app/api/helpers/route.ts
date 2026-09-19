@@ -5,7 +5,7 @@ import { emit } from "@/lib/events";
 import { INITIAL_RELIABILITY } from "@/lib/dispatch";
 import { HELPER_SESSION_MAX_AGE_SEC, SESSION_COOKIE, isSecureRequest, serializeCookie, sign } from "@/lib/session";
 import { normalizePhone } from "@/lib/sms";
-import { equipmentOf, isLatLng, json, jsonError, profileOf, readJson, safe, skillsOrEmpty, text, trustOf } from "@/lib/validate";
+import { equipmentOf, isLatLng, json, jsonError, profileOf, ratesOf, readJson, safe, skillsOrEmpty, text, trustOf } from "@/lib/validate";
 import { withHelperLock } from "@/lib/escrow";
 import { walletOf } from "@/lib/policy";
 import { onReject } from "@/lib/waves";
@@ -34,6 +34,9 @@ export const POST = safe(async (req: Request) => {
   if (!skills) return jsonError(400, "skills_invalid");
   const equipment = equipmentOf(b.equipment);
   if (!equipment) return jsonError(400, "equipment_invalid");
+  const rates = ratesOf(b.rates, skills);
+  if (!rates.ok) return jsonError(400, "rates_invalid");
+  if (b.verified !== undefined && typeof b.verified !== "boolean") return jsonError(400, "verified_invalid");
   const prof = b.profile === undefined ? null : profileOf(b.profile, normalizePhone);
   if (prof && !prof.ok) return jsonError(400, `${prof.field}_invalid`);
   if (b.location !== undefined && b.location !== null && !isLatLng(b.location)) return jsonError(400, "location_invalid");
@@ -46,7 +49,7 @@ export const POST = safe(async (req: Request) => {
   if (!ops && s) {
     if (phone !== s.phone) return jsonError(403, "forbidden");
     if (b.id !== undefined && b.id !== s.helperId) return jsonError(403, "forbidden");
-    if (b.reliability !== undefined || b.lastSeen !== undefined) return jsonError(403, "forbidden");
+    if (b.reliability !== undefined || b.lastSeen !== undefined || b.verified !== undefined) return jsonError(403, "forbidden");
     existing = await store.getHelperByPhone(phone);
   } else {
     existing = typeof b.id === "string" ? await store.getHelper(b.id) : await store.getHelperByPhone(phone);
@@ -56,7 +59,8 @@ export const POST = safe(async (req: Request) => {
   const now = new Date().toISOString();
   const id = existing?.id ?? (typeof b.id === "string" ? b.id : randomUUID());
   // The wallet is re-read inside the helper lock, so a payout landing while this profile is being saved is not lost.
-  const helper = await withHelperLock(id, async () => store.upsertHelper({
+  const helper = await withHelperLock(id, async () => { const fresh = await store.getHelper(id); return store.upsertHelper({
+    ...(fresh ?? {}), // keep everything this form does not edit (ID proof, pause marker, …)
     id,
     name, phone, skills,
     location: isLatLng(b.location) ? b.location : b.location === null ? null : existing?.location ?? null,
@@ -66,9 +70,13 @@ export const POST = safe(async (req: Request) => {
     equipment: b.equipment === undefined ? existing?.equipment ?? [] : equipment,
     trustTier: trust.value.trustTier,
     credentialId: trust.value.credentialId,
-    walletBalance: walletOf(await store.getHelper(id)),
-    ...(prof?.ok ? { profile: prof.value } : existing?.profile ? { profile: existing.profile } : {}),
-  }));
+    walletBalance: walletOf(fresh),
+    rates: b.rates === undefined ? fresh?.rates ?? {} : rates.value,
+    idProof: ops && typeof b.verified === "boolean"
+      ? (b.verified ? { fileId: null, fileName: "verified by admin", mime: "", size: 0, uploadedAt: now, status: "verified" as const, reviewedBy: "admin", reviewedAt: now, note: null } : null)
+      : fresh?.idProof ?? null,
+    ...(prof?.ok ? { profile: prof.value } : fresh?.profile ? { profile: fresh.profile } : {}),
+  }); });
   emit("helper:updated", { helper });
   const headers: HeadersInit = {};
   let token: string | undefined;

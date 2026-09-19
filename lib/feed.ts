@@ -1,25 +1,23 @@
 /**
- * The signed-in user's dashboard: their profile, their own open request, the job they accepted, and nearby open
- * requests that need their skills or equipment (full requester details, so they can decide).
- * Upgrade: requests the user may not accept (paid micro-gigs without a Certified Pro badge) are hidden entirely;
- * equipment matches use what triage says the situation calls for plus the usual kit for the need type; a paid
- * micro-gig is only relevant to someone with the trade skill (owning a pump does not make you the plumber).
+ * The signed-in user's dashboard in the community-services app:
+ *   - their profile, their own open request, and the job they accepted (if any);
+ *   - as a provider: open service requests nearby for the services they offer, with the requester's details,
+ *     newest first. Hidden while they are unavailable or already on a job.
  */
 import { getStore } from "./store";
-import { haversineKm, waveWindowMs } from "./dispatch";
+import { haversineKm } from "./dispatch";
 import { mapsUrl } from "./sms";
-import { TYPE_EQUIPMENT } from "./taxonomy";
 import { hasDeclined } from "./waves";
-import { canAccept, categoryOf } from "./policy";
+import { categoryOf, rateFor } from "./policy";
 import { buildHelperView } from "./views";
-import type { Equipment, Helper, HelperView, HelpRequest, Skill } from "./types";
+import type { Equipment, Helper, HelperView, HelpRequest, RateRange, Skill } from "./types";
 
 export const FEED_RADIUS_KM = 10;
-const URGENCY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
 export type FeedItem = {
   request: HelpRequest; distanceKm: number | null; mapsUrl: string | null;
   matchedSkills: Skill[]; matchedEquipment: Equipment[]; picked: boolean; expiresAt: string | null;
+  myRate: RateRange | null; // what this provider charges for the requested service
 };
 export type Dashboard = {
   me: Helper | null; phone: string; active: HelperView["active"]; myRequest: HelpRequest | null;
@@ -35,33 +33,21 @@ export async function buildDashboard(helperId: string | null, phone: string): Pr
   const base: Dashboard = { me, phone, active: null, myRequest: null, feed: [], otherNearby: 0, radiusKm: FEED_RADIUS_KM, hiddenWhileUnavailable: 0, hiddenWhileBusy: 0 };
   if (!me) return base;
   base.active = (await buildHelperView(me.id)).active;
-  base.myRequest = open.find((r) => r.requesterHelperId === me.id && r.status !== "resolved" && r.status !== "cancelled") ?? null;
+  base.myRequest = open.find((r) => r.requesterHelperId === me.id && categoryOf(r) === "SERVICE" && r.status !== "resolved" && r.status !== "cancelled") ?? null;
 
   for (const r of open) {
-    if (r.status !== "searching" && r.status !== "escalated") continue;
+    if (categoryOf(r) !== "SERVICE" || r.status !== "searching" || !r.service) continue;
     if (r.requesterHelperId === me.id || hasDeclined(r.id, me.id)) continue;
-    if (!canAccept(me, r)) continue; // not shown, not counted: they could not take it anyway
     const distanceKm = me.location && r.location ? +haversineKm(me.location, r.location).toFixed(2) : null;
     if (distanceKm !== null && distanceKm > FEED_RADIUS_KM) continue;
-    const type = r.triage?.type ?? "other";
-    const matchedSkills = (r.triage?.skills ?? []).filter((s) => me.skills.includes(s));
-    const gig = categoryOf(r) === "HOUSEHOLD_MICROGIG";
-    // A paid job lists only the tools of its trade; an emergency also lists the usual kit for its need type.
-    const wanted: Equipment[] = [...new Set([...(r.triage?.equipment ?? []), ...(gig ? [] : TYPE_EQUIPMENT[type])])];
-    const matchedEquipment = wanted.filter((e) => (me.equipment ?? []).includes(e));
-    const ping = (await store.listDispatches(r.id)).find((d) => d.helperId === me.id && d.status === "pinged");
-    const relevant = matchedSkills.length > 0 || (!gig && matchedEquipment.length > 0) || !!ping;
-    if (!relevant) { base.otherNearby++; continue; }
+    if (!me.skills.includes(r.service)) { base.otherNearby++; continue; }
     base.feed.push({
-      request: r, distanceKm, mapsUrl: r.location ? mapsUrl(r.location) : null, matchedSkills, matchedEquipment,
-      picked: !!ping, expiresAt: ping ? new Date(Date.parse(ping.pingedAt) + waveWindowMs()).toISOString() : null,
+      request: r, distanceKm, mapsUrl: r.location ? mapsUrl(r.location) : null, matchedSkills: [r.service], matchedEquipment: [],
+      picked: false, expiresAt: null, myRate: rateFor(me, r.service),
     });
   }
-  base.feed.sort((a, b) => Number(b.picked) - Number(a.picked)
-    || (URGENCY_RANK[a.request.triage?.urgency ?? "low"] - URGENCY_RANK[b.request.triage?.urgency ?? "low"])
-    || (a.distanceKm ?? 99) - (b.distanceKm ?? 99));
-  // Not available (switched off, or paused automatically after asking for help): no requests, no alerts.
-  // On a job: nothing else until it is marked done (no cards, no alerts).
+  base.feed.sort((a, b) => b.request.createdAt.localeCompare(a.request.createdAt) || (a.distanceKm ?? 99) - (b.distanceKm ?? 99));
+  // On a job: nothing else until it is marked done. Not available: no requests, no alerts.
   if (base.active) { base.hiddenWhileBusy = base.feed.length; base.feed = []; }
   else if (!me.onDuty) { base.hiddenWhileUnavailable = base.feed.length; base.feed = []; }
   return base;
