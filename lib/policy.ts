@@ -47,9 +47,12 @@ export const tierOf = (h: Pick<Helper, "trustTier"> | null | undefined): TrustTi
 export const walletOf = (h: Pick<Helper, "walletBalance"> | null | undefined): number => h?.walletBalance ?? 0;
 /** Paid household jobs may only be accepted by Certified Pros; free life-safety requests by anyone. */
 export const REQUIRED_TIER_FOR_GIG: TrustTier = "TIER_2_CERTIFIED_PRO";
-export function canAccept(h: Pick<Helper, "trustTier"> & Partial<Pick<Helper, "skills">>, r: Pick<HelpRequest, "category"> & Partial<Pick<HelpRequest, "service">>): boolean {
+/** Skills that can take a service request: the service itself plus any extra trades the AI tagged. */
+export const serviceTagsOf = (r: Partial<Pick<HelpRequest, "service" | "scope">>): Skill[] => [...new Set([...(r.service ? [r.service] : []), ...(r.scope?.workerMatchingTags ?? [])])];
+
+export function canAccept(h: Pick<Helper, "trustTier"> & Partial<Pick<Helper, "skills">>, r: Pick<HelpRequest, "category"> & Partial<Pick<HelpRequest, "service" | "scope">>): boolean {
   const cat = categoryOf(r);
-  if (cat === "SERVICE") return !!r.service && (h.skills ?? []).includes(r.service); // only providers of that service
+  if (cat === "SERVICE") return serviceTagsOf(r).some((t) => (h.skills ?? []).includes(t)); // providers of that service (or an AI-tagged trade)
   return cat === "LIFE_SAFETY" || tierOf(h) === REQUIRED_TIER_FOR_GIG;
 }
 export const isVerified = (h: Pick<Helper, "idProof"> | null | undefined): boolean => h?.idProof?.status === "verified";

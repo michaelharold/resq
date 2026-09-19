@@ -185,3 +185,43 @@ export function isEquipment(x: unknown): x is Equipment {
   return typeof x === "string" && (EQUIPMENT as readonly string[]).includes(x);
 }
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] as const;
+
+// ─── Tools (what a provider carries; what the AI says a job needs) ───────────────────────────────────────────
+// One fixed vocabulary shared by the AI scoping prompt and the provider profile, so MongoDB `$all` / `$in`
+// matching compares like with like (free-text tool names would almost never match exactly).
+export const TOOLS = [
+  "pipe_wrench", "plunger", "pipe_sealant", "drain_snake",
+  "multimeter", "voltage_tester", "wire_stripper", "insulation_tape",
+  "power_drill", "ladder", "screwdriver_set", "hammer", "saw", "measuring_tape",
+  "ac_gas_kit", "vacuum_pump", "paint_roller", "sandpaper",
+  "vacuum_cleaner", "pressure_washer", "cleaning_kit",
+  "spanner_set", "tyre_inflator", "jumper_cables",
+  "bp_monitor", "thermometer", "glucometer", "stethoscope", "first_aid_kit",
+] as const;
+export type Tool = (typeof TOOLS)[number];
+export function isTool(x: unknown): x is Tool {
+  return typeof x === "string" && (TOOLS as readonly string[]).includes(x);
+}
+export const TOOL_LABELS: Record<Tool, string> = {
+  pipe_wrench: "Pipe wrench", plunger: "Plunger", pipe_sealant: "Pipe sealant / tape", drain_snake: "Drain snake",
+  multimeter: "Multimeter", voltage_tester: "Voltage tester", wire_stripper: "Wire stripper", insulation_tape: "Insulation tape",
+  power_drill: "Power drill", ladder: "Ladder", screwdriver_set: "Screwdriver set", hammer: "Hammer", saw: "Saw", measuring_tape: "Measuring tape",
+  ac_gas_kit: "AC gas kit", vacuum_pump: "Vacuum pump", paint_roller: "Paint roller & brushes", sandpaper: "Sandpaper",
+  vacuum_cleaner: "Vacuum cleaner", pressure_washer: "Pressure washer", cleaning_kit: "Cleaning kit",
+  spanner_set: "Spanner set", tyre_inflator: "Tyre inflator", jumper_cables: "Jumper cables",
+  bp_monitor: "BP monitor", thermometer: "Thermometer", glucometer: "Glucometer", stethoscope: "Stethoscope", first_aid_kit: "First-aid kit",
+};
+/** Tools usually relevant to each service: offered as a checklist at sign-up and used to seed demo providers. */
+export const SERVICE_TOOLS: Record<Service, Tool[]> = {
+  plumber: ["pipe_wrench", "plunger", "pipe_sealant", "drain_snake", "power_drill", "screwdriver_set"],
+  electrician: ["multimeter", "voltage_tester", "wire_stripper", "insulation_tape", "ladder", "screwdriver_set", "power_drill"],
+  carpenter: ["power_drill", "saw", "hammer", "measuring_tape", "screwdriver_set", "sandpaper"],
+  ac_technician: ["ac_gas_kit", "vacuum_pump", "multimeter", "ladder", "screwdriver_set"],
+  appliance_repair: ["multimeter", "screwdriver_set", "voltage_tester", "spanner_set"],
+  painter: ["paint_roller", "ladder", "sandpaper", "measuring_tape"],
+  cleaner: ["vacuum_cleaner", "pressure_washer", "cleaning_kit"],
+  mechanic: ["spanner_set", "tyre_inflator", "jumper_cables", "screwdriver_set"],
+  doctor: ["stethoscope", "bp_monitor", "thermometer", "glucometer", "first_aid_kit"],
+  nurse: ["bp_monitor", "thermometer", "glucometer", "first_aid_kit"],
+  caregiver: ["thermometer", "bp_monitor", "first_aid_kit"],
+};

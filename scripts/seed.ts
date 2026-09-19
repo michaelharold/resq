@@ -27,6 +27,26 @@ const RATES: Partial<Record<Skill, [number, number]>> = {
   plumber: [300, 800], electrician: [300, 900], carpenter: [400, 1200], ac_technician: [500, 1500], appliance_repair: [400, 1200],
   painter: [800, 3000], cleaner: [400, 1500], mechanic: [300, 1000], doctor: [300, 800], nurse: [400, 1000], caregiver: [600, 1500],
 };
+/** Tool kits per service (duplicated from lib/taxonomy.ts SERVICE_TOOLS so this file stays self-contained). */
+const KITS: Partial<Record<Skill, string[]>> = {
+  plumber: ["pipe_wrench", "plunger", "pipe_sealant", "drain_snake", "power_drill", "screwdriver_set"],
+  electrician: ["multimeter", "voltage_tester", "wire_stripper", "insulation_tape", "ladder", "screwdriver_set", "power_drill"],
+  carpenter: ["power_drill", "saw", "hammer", "measuring_tape", "screwdriver_set", "sandpaper"],
+  ac_technician: ["ac_gas_kit", "vacuum_pump", "multimeter", "ladder", "screwdriver_set"],
+  appliance_repair: ["multimeter", "screwdriver_set", "voltage_tester", "spanner_set"],
+  painter: ["paint_roller", "ladder", "sandpaper", "measuring_tape"],
+  cleaner: ["vacuum_cleaner", "pressure_washer", "cleaning_kit"],
+  mechanic: ["spanner_set", "tyre_inflator", "jumper_cables", "screwdriver_set"],
+  doctor: ["stethoscope", "bp_monitor", "thermometer", "glucometer", "first_aid_kit"],
+  nurse: ["bp_monitor", "thermometer", "glucometer", "first_aid_kit"],
+  caregiver: ["thermometer", "bp_monitor", "first_aid_kit"],
+};
+/** Every third provider is missing one tool, so tool matching has something to discriminate on in the demo. */
+function seedTools(skills: Skill[], i: number): Helper["toolsOnHand"] {
+  const all = [...new Set(skills.flatMap((s) => KITS[s] ?? []))];
+  return (i % 3 === 2 ? all.slice(1) : all) as Helper["toolsOnHand"];
+}
+
 function seedRates(skills: Skill[], i: number): Partial<Record<Skill, { min: number; max: number }>> {
   const out: Partial<Record<Skill, { min: number; max: number }>> = {};
   for (const sk of skills) {
@@ -76,6 +96,7 @@ export function seedHelpers(center: LatLng, now: Date): Helper[] {
       phone: `+9190000000${String(i + 1).padStart(2, "0")}`,
       skills: SKILLSETS[i],
       rates: seedRates(SKILLSETS[i], i),
+      toolsOnHand: seedTools(SKILLSETS[i], i),
       location: { lat: +(center.lat + dLat).toFixed(6), lng: +(center.lng + dLng).toFixed(6) },
       onDuty: true,
       reliability: +(0.8 + rnd() * 0.18).toFixed(3), // 4.0–4.9 stars

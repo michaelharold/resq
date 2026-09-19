@@ -5,6 +5,7 @@ import { Icon } from "./icons";
 import { Badge, ETABadge, NavBar, PulsingDot, initials } from "./ui";
 import { SKILL_META } from "./skills";
 import { LiveMap, type MapMarker } from "./LiveMap";
+import { JobBrief } from "./JobBrief";
 import { api, etaMinutes, fmtDistance, fmtTime, getHelperToken, getUid } from "@/lib/client/api";
 import { useSnapshot } from "@/lib/client/sse";
 import { MEDICAL_SERVICES, type Service } from "@/lib/taxonomy";
@@ -85,6 +86,7 @@ export function ServiceRequestView({ id, onClose }: { id: string; onClose: () =>
             <p className="mt-1 text-sm text-resq-navy">“{r.description}”</p>
             <p className="mt-2 text-xs text-resq-slate">Sent {fmtTime(r.createdAt)}{r.location ? " · your location is shared with the provider who accepts" : ""}</p>
           </section>
+          <JobBrief r={r} title="What the provider will see after accepting" />
 
           {r.status === "searching" && (
             <section className="card-shadow rounded-2xl border border-slate-100 bg-white p-4">

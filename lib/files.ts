@@ -47,3 +47,35 @@ export async function readIdProof(fileId: string): Promise<Buffer | null> {
     return null;
   }
 }
+
+// ─── Job photos (taken by the customer for the AI's photo requests; visible to the accepted worker) ────────────
+export const JOB_PHOTO_MAX_BYTES = 6 * 1024 * 1024;
+export const JOB_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic"] as const;
+
+export async function saveJobPhoto(bytes: Buffer, meta: { jobId: string; label: string; mime: string }): Promise<string> {
+  const { GridFSBucket } = await import("mongodb");
+  const bucket = new GridFSBucket(await getDb(), { bucketName: "job_photos" });
+  const id = randomUUID();
+  await new Promise<void>((resolve, reject) => {
+    const up = bucket.openUploadStreamWithId(id as never, meta.label.slice(0, 80) || "photo", { metadata: { jobId: meta.jobId, mime: meta.mime, uploadedAt: new Date().toISOString() } });
+    up.on("finish", () => resolve()).on("error", reject);
+    up.end(bytes);
+  });
+  return `job_photos:${id}`;
+}
+
+export async function readJobPhoto(fileId: string): Promise<Buffer | null> {
+  try {
+    const [bucketName, id] = fileId.split(":");
+    if (bucketName !== "job_photos" || !id || !/^[0-9a-f-]{36}$/.test(id)) return null;
+    const { GridFSBucket } = await import("mongodb");
+    const bucket = new GridFSBucket(await getDb(), { bucketName });
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      bucket.openDownloadStream(id as never).on("data", (c: Buffer) => chunks.push(c)).on("end", () => resolve()).on("error", reject);
+    });
+    return Buffer.concat(chunks);
+  } catch {
+    return null;
+  }
+}

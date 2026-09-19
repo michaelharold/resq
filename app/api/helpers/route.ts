@@ -5,7 +5,7 @@ import { emit } from "@/lib/events";
 import { INITIAL_RELIABILITY } from "@/lib/dispatch";
 import { HELPER_SESSION_MAX_AGE_SEC, SESSION_COOKIE, isSecureRequest, serializeCookie, sign } from "@/lib/session";
 import { normalizePhone } from "@/lib/sms";
-import { equipmentOf, isLatLng, json, jsonError, profileOf, ratesOf, readJson, safe, skillsOrEmpty, text, trustOf } from "@/lib/validate";
+import { equipmentOf, isLatLng, json, jsonError, profileOf, ratesOf, readJson, safe, skillsOrEmpty, text, toolsOf, trustOf } from "@/lib/validate";
 import { withHelperLock } from "@/lib/escrow";
 import { walletOf } from "@/lib/policy";
 import { onReject } from "@/lib/waves";
@@ -36,6 +36,8 @@ export const POST = safe(async (req: Request) => {
   if (!equipment) return jsonError(400, "equipment_invalid");
   const rates = ratesOf(b.rates, skills);
   if (!rates.ok) return jsonError(400, "rates_invalid");
+  const tools = toolsOf(b.toolsOnHand);
+  if (!tools) return jsonError(400, "toolsOnHand_invalid");
   if (b.verified !== undefined && typeof b.verified !== "boolean") return jsonError(400, "verified_invalid");
   const prof = b.profile === undefined ? null : profileOf(b.profile, normalizePhone);
   if (prof && !prof.ok) return jsonError(400, `${prof.field}_invalid`);
@@ -72,6 +74,7 @@ export const POST = safe(async (req: Request) => {
     credentialId: trust.value.credentialId,
     walletBalance: walletOf(fresh),
     rates: b.rates === undefined ? fresh?.rates ?? {} : rates.value,
+    toolsOnHand: b.toolsOnHand === undefined ? fresh?.toolsOnHand ?? [] : tools,
     idProof: ops && typeof b.verified === "boolean"
       ? (b.verified ? { fileId: null, fileName: "verified by admin", mime: "", size: 0, uploadedAt: now, status: "verified" as const, reviewedBy: "admin", reviewedAt: now, note: null } : null)
       : fresh?.idProof ?? null,

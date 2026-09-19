@@ -1,3 +1,4 @@
+import { smsConfigured } from "@/lib/sms";
 import { CALLOUT_FEES, CURRENCY, fallbackMs } from "@/lib/policy";
 import { LANDMARKS } from "@/lib/landmarks";
 /**
@@ -27,11 +28,7 @@ export async function GET(): Promise<Response> {
   const waveRaw = finiteOr(process.env.RESQ_WAVE_WINDOW_MS, WAVE_WINDOW_DEFAULT_MS);
   const waveWindowMs = waveRaw > 0 ? waveRaw : WAVE_WINDOW_DEFAULT_MS;
 
-  const smsSimulated = !(
-    process.env.TWILIO_ACCOUNT_SID &&
-    process.env.TWILIO_AUTH_TOKEN &&
-    process.env.TWILIO_FROM
-  );
+  const smsSimulated = !smsConfigured();
 
   const modelRaw = process.env.OLLAMA_MODEL;
   const ollamaModel = modelRaw && modelRaw.trim() ? modelRaw.trim() : "qwen2.5:3b";

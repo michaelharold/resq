@@ -16,7 +16,7 @@ import { releaseEscrowLocked, withHelperLock, type EscrowRelease } from "./escro
 import { GIG_TYPES, REQUIRED_TIER_FOR_GIG, canAccept, categoryOf, fallbackMs, feeOf, isCalloutFee, mustBeLifeSafety } from "./policy";
 import { isKnownGigType } from "./validate";
 import { EQUIPMENT_LABELS, SKILL_LABELS, TYPE_SMS_LABELS } from "./taxonomy";
-import type { Channel, Dispatch, Equipment, GigType, Helper, HelpRequest, LatLng, LocationSource, NeedType, RequestCategory, RequesterRole, StoreErrorReason, TriageResult, Urgency, UserProfile, Skill } from "./types";
+import type { Channel, Dispatch, Equipment, GigType, Helper, HelpRequest, LatLng, LocationSource, NeedType, RequestCategory, RequesterRole, StoreErrorReason, TriageResult, Urgency, UserProfile, Skill, TaskScope, JobPhoto } from "./types";
 
 const g = globalThis as unknown as { __resq_locks?: Map<string, Promise<unknown>> };
 const locks = (g.__resq_locks ??= new Map());
@@ -186,6 +186,9 @@ function gigTriage(t: TriageResult, gigType: GigType): TriageResult {
 export const SERVICE_RADIUS_KM = 10;
 export type ServiceRequestInput = {
   service: Skill; description: string; location: LatLng | null; account: Helper;
+  // AI-scoped jobs (/api/scope-task): same id as the MongoDB `jobs` document; dispatch is done by the caller.
+  id?: string; notify?: boolean; scope?: TaskScope | null; shortCode?: string | null;
+  attachments?: JobPhoto[]; answers?: { question: string; answer: string }[]; aiMatchedWorkerIds?: string[];
 };
 
 /**
@@ -202,15 +205,17 @@ export async function createServiceRequest(input: ServiceRequestInput): Promise<
     summary: input.description.slice(0, 140), confidence: 1, source: "rules", clarifyingQuestion: null, equipment: [], hazardAlert: NO_HAZARD,
   };
   const request = await store.createRequest({
-    id: randomUUID(), requesterId: `acct:${input.account.id}`, requesterPhone: input.account.phone, requesterHelperId: input.account.id,
+    id: input.id ?? randomUUID(), requesterId: `acct:${input.account.id}`, requesterPhone: input.account.phone, requesterHelperId: input.account.id,
     requesterName: input.account.name, requesterProfile: input.account.profile ?? null, role: "self",
     description: input.description, location: input.location, locationSource: input.location ? "gps" : "none", landmark: null, channel: "app",
     triage: triageResult, status: "searching", wave: 1, radiusKm: SERVICE_RADIUS_KM, waveStartedAt: now, matchedHelperId: null,
     createdAt: now, updatedAt: now, category: "SERVICE", service: input.service, gigType: null, calloutFee: 0, escrowStatus: null,
     upgradedToLifeSafety: false, fallbackAt: null, emergencyContactNotifiedAt: null, paymentStatus: null,
+    scope: input.scope ?? null, shortCode: input.shortCode ?? null, attachments: input.attachments ?? [], answers: input.answers ?? [],
+    aiMatchedWorkerIds: input.aiMatchedWorkerIds ?? [],
   });
   emit("request:updated", { request });
-  if (input.location) {
+  if (input.location && input.notify !== false) {
     const providers = (await store.getOnDutyHelpers())
       .filter((h) => h.id !== input.account.id && h.skills.includes(input.service) && h.location)
       .map((h) => ({ h, km: haversineKm(input.location!, h.location!) }))

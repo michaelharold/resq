@@ -1,5 +1,6 @@
 "use client";
 /* The job a user accepted: full requester details, live map to them, call buttons, done. */
+import { JobBrief } from "./JobBrief";
 import { Icon } from "./icons";
 import { Badge } from "./ui";
 import { LiveMap, type MapMarker } from "./LiveMap";
@@ -59,6 +60,7 @@ export function ActiveJob({ r, mapsUrl, me, simulated, onDone }: { r: HelpReques
           </div>
         )}
         <p className="rounded-xl bg-slate-50 p-3 text-sm text-resq-navy">“{r.description}”</p>
+        <JobBrief r={r} />
         <PersonDetails r={r} />
         {r.location && (
           <div className="overflow-hidden rounded-2xl">

@@ -1,5 +1,5 @@
 /** Hand-written input guards shared by every route (README §10 rule 6). */
-import { BLOOD_GROUPS, SKILLS, isEquipment, isSkill } from "./taxonomy";
+import { BLOOD_GROUPS, SKILLS, isEquipment, isSkill, isTool, type Tool } from "./taxonomy";
 import { GIG_TYPES, isCalloutFee, isGigType, isTrustTier, tierOf } from "./policy";
 import type { Equipment, GigType, RequestCategory, TrustTier, UserProfile } from "./types";
 import type { LatLng, Skill } from "./types";
@@ -115,6 +115,12 @@ export function ratesOf(x: unknown, skills: Skill[]): { ok: true; value: Partial
     out[k] = { min, max };
   }
   return { ok: true, value: out };
+}
+
+export function toolsOf(x: unknown): Tool[] | null {
+  if (x === undefined) return [];
+  if (!Array.isArray(x) || !x.every(isTool)) return null;
+  return [...new Set(x as Tool[])];
 }
 
 export async function readJson(req: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {

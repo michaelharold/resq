@@ -37,7 +37,11 @@ export class MemoryStore implements Store {
       for (const h of seedHelpers(opts.center ?? getSeedCenter(), opts.now ?? new Date())) this.helpers.set(h.id, h);
       for (const r of seedResidents(opts.center ?? getSeedCenter(), opts.now ?? new Date())) this.locations.set(r.phone, r);
     }
-    this.ready = this.load();
+    this.ready = this.load().then(() => {
+      // Demo providers live in MongoDB too, so spatial matching ($near on users.geo) can find them.
+      if (this.persistence?.name.startsWith("MongoDB")) for (const id of this.helpers.keys()) if (SEEDED.test(id)) this.dirty.helpers.add(id);
+      this.save();
+    });
   }
 
   private async load() {
@@ -64,7 +68,7 @@ export class MemoryStore implements Store {
       this.dirty = { helpers: new Set(), locations: new Set(), deletedLocations: new Set(), zones: new Set(), authorities: new Set(), audit: [] };
       const pick = <T,>(m: Map<string, T>, ids: Set<string>) => [...ids].map((id) => m.get(id)).filter((x): x is T => !!x).map((x) => c(x));
       const changes: Changes = {
-        helpers: pick(this.helpers, d.helpers).filter((h) => !SEEDED.test(h.id)),
+        helpers: pick(this.helpers, d.helpers).filter((h) => this.persistence?.name.startsWith("MongoDB") || !SEEDED.test(h.id)),
         locations: pick(this.locations, d.locations).filter((l) => l.source !== "seed"),
         deletedLocations: [...d.deletedLocations], zones: pick(this.zones, d.zones), authorities: pick(this.authorities, d.authorities), audit: d.audit,
         full: {

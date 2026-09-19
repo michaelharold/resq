@@ -16,15 +16,16 @@ import { BeaconChip } from "@/components/BeaconChip";
 import { ActiveJob, PersonDetails, beep } from "@/components/ActiveJob";
 import { ServiceRequestView, Stars, VerifiedBadge, fmtRate, type ProviderPreview } from "@/components/ServiceRequestView";
 import { VoiceMic } from "@/components/VoiceMic";
+import { TaskScopeModal } from "@/components/TaskScopeModal";
 import { LiveMap, type MapMarker } from "@/components/LiveMap";
 import { DEMO_RADIUS_KM, api, demoSpot, distanceKm, fmtDistance, fmtTime, getHelperToken, getPosition, setHelperToken, stepToward, type LatLng } from "@/lib/client/api";
 import { useLocationBeacon } from "@/lib/client/beacon";
 import { useSnapshot } from "@/lib/client/sse";
 import { speechErrorText, useSpeech } from "@/lib/client/speech";
-import { BLOOD_GROUPS, MEDICAL_SERVICES, SERVICES, type Service } from "@/lib/taxonomy";
+import { BLOOD_GROUPS, MEDICAL_SERVICES, SERVICES, SERVICE_TOOLS, TOOL_LABELS, type Service } from "@/lib/taxonomy";
 import { isVerified } from "@/lib/policy";
 import type { Dashboard, FeedItem } from "@/lib/feed";
-import type { Helper, RateRange, RequestView, Skill, UserProfile } from "@/lib/types";
+import type { Helper, RateRange, RequestView, Skill, Tool, UserProfile } from "@/lib/types";
 
 type Config = { seedCenter: LatLng };
 type Screen = { name: "loading" } | { name: "auth" } | { name: "onboarding" } | { name: "profile" } | { name: "home" }
@@ -121,6 +122,7 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
     return o;
   });
   const [file, setFile] = useState<File | null>(null);
+  const [tools, setTools] = useState<Tool[]>(me?.toolsOnHand ?? []);
   const [available, setAvailable] = useState(me ? me.onDuty : true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -140,7 +142,8 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
     const rateBody: Partial<Record<Skill, RateRange>> = {};
     for (const s of offered) rateBody[s] = { min: Number(rates[s]!.min), max: Number(rates[s]!.max) };
     const r = await api<{ token?: string; helper: Helper }>("/api/helpers", {
-      body: { name, phone, skills: [...otherSkills, ...offered], rates: rateBody, profile: { ...profile, age: profile.age ? Number(profile.age) : null } },
+      body: { name, phone, skills: [...otherSkills, ...offered], rates: rateBody, toolsOnHand: tools.filter((t) => offered.some((s) => SERVICE_TOOLS[s].includes(t))),
+        profile: { ...profile, age: profile.age ? Number(profile.age) : null } },
     });
     if (!r.ok) { setBusy(false); setMsg(`Please check your details (${r.error.replace(/_/g, " ")}).`); setStep(0); return; }
     if (r.data.token) setHelperToken(r.data.token);
@@ -227,6 +230,20 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
                       {rateErrors.includes(s) && <span className="text-xs text-resq-red">Enter whole rupees, min ≤ max</span>}
                     </div>
                   ))}
+                </div>
+
+                <h3 className="mb-1 mt-6 font-display font-bold text-resq-navy">Tools you carry</h3>
+                <p className="mb-2 text-sm text-resq-slate">Jobs that need these tools are matched to you first, and the customer knows you&apos;ll come prepared.</p>
+                <div className="flex flex-wrap gap-2">
+                  {[...new Set(offered.flatMap((s) => SERVICE_TOOLS[s]))].map((t) => {
+                    const on = tools.includes(t);
+                    return (
+                      <button key={t} onClick={() => setTools(on ? tools.filter((x) => x !== t) : [...tools, t])} aria-pressed={on}
+                        className={`flex min-h-11 items-center gap-1.5 rounded-xl border-2 px-3 text-sm font-semibold ${on ? "border-resq-cyan bg-resq-cyan-light text-resq-cyan" : "border-slate-200 bg-white text-resq-slate"}`}>
+                        {on && <Icon.Check size={14} />}{TOOL_LABELS[t]}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <h3 className="mb-1 mt-6 font-display font-bold text-resq-navy">Verify your identity</h3>
@@ -464,8 +481,10 @@ function JobCard({ f, onOpen }: { f: FeedItem; onOpen: () => void }) {
         <span className="ml-auto text-xs text-resq-slate">{fmtTime(r.createdAt)}</span>
       </div>
       <p className="mt-1.5 text-sm text-resq-navy"><strong>{r.requesterName ?? "A neighbour"}</strong> · {fmtDistance(f.distanceKm)} away</p>
+      {f.aiMatch && <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-resq-green-light px-2 py-0.5 text-xs font-bold text-resq-green"><Icon.Check size={12} />Matched for you: you have the tools</p>}
+      {r.scope && <p className="mt-1 text-sm font-semibold text-resq-navy">{r.scope.parsedTitle} · ~{r.scope.estimatedTimeMinutes} min</p>}
       <p className="line-clamp-2 text-sm text-resq-slate">“{r.description}”</p>
-      <p className="mt-2 text-xs text-resq-slate">Your rate: <strong className="text-resq-navy">{fmtRate(f.myRate)}</strong></p>
+      <p className="mt-2 text-xs text-resq-slate">Your rate: <strong className="text-resq-navy">{fmtRate(f.myRate)}</strong>{r.scope?.requiredTools.length ? ` · you have ${f.toolsHave.length}/${r.scope.requiredTools.length} tools` : ""}{f.photoCount ? ` · ${f.photoCount} photo${f.photoCount > 1 ? "s" : ""} after you accept` : ""}</p>
     </button>
   );
 }
@@ -492,6 +511,19 @@ function JobSheet({ f, me, onClose, onAccept, onDecline }: { f: FeedItem; me: He
         </div>
         <div className="space-y-4 p-5">
           <p className="rounded-xl bg-slate-50 p-3 text-sm text-resq-navy">“{r.description}”</p>
+          {r.scope && (
+            <div className="rounded-xl border border-resq-cyan/30 bg-resq-cyan-light p-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-resq-cyan">AI job breakdown</p>
+              <p className="mt-1 text-sm font-semibold text-resq-navy">{r.scope.parsedTitle} · ~{r.scope.estimatedTimeMinutes} min · {r.scope.skillLevelRequired}</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {r.scope.requiredTools.map((t) => {
+                  const have = f.toolsHave.includes(t);
+                  return <span key={t} className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${have ? "bg-resq-green-light text-resq-green" : "bg-white text-resq-slate"}`}>{have ? <Icon.Check size={12} /> : null}{TOOL_LABELS[t]}</span>;
+                })}
+              </div>
+              {f.photoCount > 0 && <p className="mt-2 text-xs text-resq-slate">{f.photoCount} photo{f.photoCount > 1 ? "s" : ""} and the customer&apos;s answers unlock when you accept.</p>}
+            </div>
+          )}
           <PersonDetails r={r} />
           <p className="rounded-xl bg-resq-green-light p-3 text-sm text-resq-navy">Your listed rate for this service: <strong>{fmtRate(f.myRate)}</strong></p>
           {r.location && <div className="overflow-hidden rounded-2xl"><LiveMap center={r.location} radiusKm={Math.max(0.4, (f.distanceKm ?? 0.5) * 1.4)} markers={markers} height={170} route={me.location ? [me.location, r.location] : undefined} /></div>}
@@ -544,6 +576,7 @@ function Describe({ service, me, center, onBack, onCreated }: { service: Service
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voiceErr, setVoiceErr] = useState<string | null>(null);
+  const [analysing, setAnalysing] = useState(false);
   const speech = useSpeech({ onText: setText, onFinal: setText, onError: (e) => setVoiceErr(speechErrorText(e)) });
   useEffect(() => { void whereAmI(center).then(setLoc); }, [center]);
   useEffect(() => {
@@ -597,10 +630,18 @@ function Describe({ service, me, center, onBack, onCreated }: { service: Service
         <p className="mt-4 flex items-center gap-1 text-xs text-resq-slate"><Icon.MapPin size={12} />{loc ? (loc.source === "gps" ? "Using your GPS location" : "Demo location near TKMCE (this device's GPS isn't in the demo area)") : "Getting your location…"}. Shared only with the provider who accepts.</p>
         {MEDICAL_SERVICES.includes(service) && <p className="mt-2 rounded-xl bg-resq-red-light p-3 text-xs text-resq-red-dark">For a medical emergency, don&apos;t wait: <a href="tel:112" className="font-bold underline">call 112</a>.</p>}
         {error && <p role="alert" className="mt-3 rounded-xl bg-resq-red-light p-3 text-sm font-medium text-resq-red">{error}</p>}
-        <button onClick={submit} disabled={busy || text.trim().length < 5}
-          className={`mt-4 min-h-16 w-full rounded-2xl font-display text-xl font-bold ${text.trim().length >= 5 ? "bg-resq-red text-white shadow-lg" : "cursor-not-allowed bg-slate-200 text-slate-400"}`}>
-          {busy ? "Sending…" : `Request a ${m.label.toLowerCase()}`}
+        <button onClick={() => setAnalysing(true)} disabled={busy || text.trim().length < 5}
+          className={`mt-4 flex min-h-16 w-full items-center justify-center gap-2 rounded-2xl font-display text-xl font-bold ${text.trim().length >= 5 ? "bg-resq-red text-white shadow-lg" : "cursor-not-allowed bg-slate-200 text-slate-400"}`}>
+          <Icon.Activity size={20} />Analyse &amp; request
         </button>
+        <p className="mt-1.5 text-center text-xs text-resq-slate">Local AI works out the tools and time, and which photos help the {m.label.toLowerCase()} come prepared.</p>
+        <button onClick={submit} disabled={busy || text.trim().length < 5} className="mt-2 min-h-12 w-full rounded-xl text-sm font-semibold text-resq-slate underline disabled:opacity-50">
+          {busy ? "Sending…" : "Skip the analysis and send now"}
+        </button>
+        {analysing && (
+          <TaskScopeModal service={service} description={text.trim()} location={loc?.at ?? me.location ?? null}
+            onClose={() => setAnalysing(false)} onSent={onCreated} onSendWithoutAI={() => { setAnalysing(false); void submit(); }} />
+        )}
       </main>
     </>
   );

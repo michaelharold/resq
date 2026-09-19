@@ -10,7 +10,8 @@
  * is type-only (erased at compile time), so this file has no runtime dependencies and
  * `scripts/seed.ts` can `import type` from it under Node's type stripping.
  */
-import type { NEED_TYPES, SKILLS, URGENCIES, Equipment } from "./taxonomy";
+import type { NEED_TYPES, SKILLS, URGENCIES, Equipment, Tool } from "./taxonomy";
+export type { Tool } from "./taxonomy";
 export type { Equipment } from "./taxonomy";
 import type { HazardKind } from "./hazards";
 export type { HazardKind } from "./hazards";
@@ -38,6 +39,7 @@ export type Helper = {
   availabilityPausedAt?: string | null; // set when availability was switched off automatically because this person asked for help
   rates?: Partial<Record<Skill, RateRange>>; // what the provider charges per service (₹, shown to people requesting it)
   idProof?: IdProof | null;                  // uploaded identity document and its verification status
+  toolsOnHand?: Tool[];                      // tools the provider carries (matched against the AI's required tools)
   profile?: UserProfile;   // basic details collected at sign-up
 };
 
@@ -97,6 +99,11 @@ export type HelpRequest = {
   emergencyContactNotifiedAt?: string | null; // when the requester's emergency contact was texted
   service?: Skill | null;               // SERVICE requests: the service the user tapped (plumber, electrician, doctor…)
   paymentStatus?: "due" | "paid" | null; // SERVICE requests after completion (in-app payment is a placeholder for now)
+  scope?: TaskScope | null;              // AI job breakdown (set when the request came through /api/scope-task)
+  shortCode?: string | null;             // 4-digit code providers reply with by SMS: "ACCEPT 1234"
+  aiMatchedWorkerIds?: string[];         // providers the AI matching engine picked (skills + tools); shown as "Matched for you"
+  attachments?: JobPhoto[];              // photos the customer took for the AI's photo requests (visible to the accepted worker only)
+  answers?: { question: string; answer: string }[]; // customer's answers to the AI's questions (visible to the accepted worker only)
   triage: TriageResult | null;
   status: RequestStatus;
   wave: number; // 0 before dispatch starts, 1..4 while searching
@@ -204,3 +211,22 @@ export type IdProof = {
   fileId: string | null; fileName: string; mime: string; size: number; uploadedAt: string;
   status: VerificationStatus; reviewedBy: string | null; reviewedAt: string | null; note: string | null;
 };
+
+/** Structured job breakdown produced by the local AI (lib/scope.ts). */
+export type SkillLevel = "basic" | "intermediate" | "expert";
+export type TaskScope = {
+  parsedTitle: string;            // short job title, e.g. "Fix leaking kitchen sink pipe"
+  category: Skill;                // one of SERVICES
+  urgencyScore: number;           // 1 (whenever) … 10 (right now)
+  estimatedTimeMinutes: number;   // 10 … 480
+  requiredTools: Tool[];          // from TOOLS
+  skillLevelRequired: SkillLevel;
+  workerMatchingTags: Skill[];    // services that could do this job (always includes category)
+  steps: string[];                // short job breakdown (2–5 steps) shown to the customer and provider
+  photoRequests: PhotoRequest[];  // 1–4 photos the customer should take so the worker can prepare (what, angle, why)
+  questions: string[];            // 0–3 short questions whose answers help the worker bring the right parts
+  model: string;                  // which local model produced it
+  source: "ollama";
+};
+export type PhotoRequest = { what: string; angle: string; why: string };
+export type JobPhoto = { id: string; fileId: string; label: string; angle: string; mime: string; size: number; uploadedAt: string };
