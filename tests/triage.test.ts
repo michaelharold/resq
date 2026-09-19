@@ -117,7 +117,7 @@ test("normalizeTriageOutput dedupes and filters skills, falls back to TYPE_SKILL
     { ...base, skills: ["swimmer", "wizard", "swimmer", 42, "doctor"] } as never,
     "t",
   );
-  assert.deepEqual(out.skills, ["swimmer", "doctor"]);
+  assert.deepEqual(out.skills, [...TYPE_SKILLS.flood_rescue, "doctor"]); // curated defaults lead, valid extras follow
   assert.deepEqual(normalizeTriageOutput({ ...base, skills: [] } as never, "t").skills, TYPE_SKILLS.flood_rescue);
   assert.deepEqual(normalizeTriageOutput({ ...base, skills: "swimmer" } as never, "t").skills, TYPE_SKILLS.flood_rescue);
   assert.deepEqual(normalizeTriageOutput({ ...base, skills: ["nope"] } as never, "t").skills, TYPE_SKILLS.flood_rescue);
@@ -191,7 +191,7 @@ test("triage() returns source ollama for a valid fake response", async () => {
       assert.equal(r.source, "ollama");
       assert.equal(r.type, "cardiac_no_breathing");
       assert.equal(r.urgency, "critical");
-      assert.deepEqual(r.skills, ["doctor"]);
+      assert.deepEqual(r.skills, TYPE_SKILLS.cardiac_no_breathing);
       assert.equal(r.summary, "x");
       assert.equal(r.confidence, 0.9);
       assert.equal(r.clarifyingQuestion, null);
