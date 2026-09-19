@@ -37,7 +37,9 @@ const g = globalThis as unknown as { __resq_store?: Store };
 function createStore(): Store {
   const kind = process.env.STORE || "memory";
   if (kind !== "memory") throw new Error(`store adapter "${kind}" not purchased`);
-  return new MemoryStore();
+  const f = process.env.RESQ_DATA_FILE?.trim();
+  const persistPath = f === "off" ? null : f || `${process.cwd()}/.data/accounts.json`;
+  return new MemoryStore({ persistPath });
 }
 
 export function getStore(): Store {

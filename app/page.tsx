@@ -1,12 +1,14 @@
 "use client";
 /* Requester app: home → report (text / hold-to-speak) → live request (triage, guidance, dispatch, match). */
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { LoginSheet } from "@/components/OtpForm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { Badge, BottomNav, Call112Bar, Container, Countdown, ETABadge, Logo, NavBar, PhoneShell, ProgressBar, PulsingDot, TopNav, TypingDots, initials } from "@/components/ui";
 import { EMERGENCY_TILES, SKILL_META, SkillPill, URGENCY_STYLE } from "@/components/skills";
 import { LiveMap, type MapMarker } from "@/components/LiveMap";
-import { DEMO_RADIUS_KM, api, distanceKm, etaMinutes, fmtDistance, fmtTime, getPosition, getUid, windowStore, type LatLng } from "@/lib/client/api";
+import { DEMO_RADIUS_KM, api, distanceKm, getHelperToken, setHelperToken, etaMinutes, fmtDistance, fmtTime, getPosition, getUid, windowStore, type LatLng } from "@/lib/client/api";
 import { useSecondsLeft, useSnapshot } from "@/lib/client/sse";
 import { useSpeech } from "@/lib/client/speech";
 import { TYPE_LABELS } from "@/lib/taxonomy";
@@ -69,6 +71,14 @@ export default function RequesterApp() {
 
 function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | null; onRequest: () => void }) {
   const [nearby, setNearby] = useState<Nearby | null>(null);
+  const router = useRouter();
+  // Only "Request help", 112 and SMS work signed out; every other option asks the user to sign in first.
+  const [signedIn, setSignedIn] = useState(false);
+  const [sheet, setSheet] = useState<{ reason: string; then: () => void } | null>(null);
+  useEffect(() => { setSignedIn(!!getHelperToken()); }, []);
+  const gate = (reason: string, then: () => void) => (getHelperToken() ? then() : setSheet({ reason, then }));
+  const toHelper = () => gate("Helpers sign in with their phone so neighbours know who is coming.", () => router.push("/helper"));
+  const signOut = async () => { await api("/api/auth/logout", { method: "POST", body: {} }); setHelperToken(null); setSignedIn(false); };
   useEffect(() => {
     if (!loc) return;
     const load = () => api<Nearby>(`/api/helpers/nearby?lat=${loc.at.lat}&lng=${loc.at.lng}`).then((r) => r.ok && setNearby(r.data));
@@ -77,7 +87,8 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
     return () => clearInterval(t);
   }, [loc]);
 
-  const share = async () => {
+  const share = () => gate("Sign in to share your location.", () => void doShare());
+  const doShare = async () => {
     if (!loc) return;
     const url = `https://maps.google.com/?q=${loc.at.lat.toFixed(6)},${loc.at.lng.toFixed(6)}`;
     try {
@@ -109,10 +120,19 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
                 </span>
               </div>
             </div>
-            <Link href="/helper" className="flex min-h-12 items-center gap-1.5 rounded-xl border border-white/20 px-3 text-xs font-semibold text-white md:hidden">
-              <Icon.Shield size={14} />Helper
-            </Link>
-            <TopNav active="home" />
+            <div className="flex items-center gap-2">
+              {signedIn ? (
+                <button onClick={signOut} className="flex min-h-12 items-center gap-1.5 rounded-xl border border-white/20 px-3 text-xs font-semibold text-white">
+                  <Icon.User size={14} />Sign out
+                </button>
+              ) : (
+                <button onClick={() => gate("Sign in to use helper features and share your location.", () => undefined)}
+                  className="flex min-h-12 items-center gap-1.5 rounded-xl border border-white/20 px-3 text-xs font-semibold text-white">
+                  <Icon.User size={14} />Sign in
+                </button>
+              )}
+              <TopNav active="home" guard={toHelper} />
+            </div>
           </div>
           <p className="mt-6 hidden max-w-md font-display text-4xl font-bold leading-tight text-white lg:block">Help is closer than you think.</p>
           <p className="mt-3 hidden max-w-md text-white/60 lg:block">Skilled neighbours (doctors, nurses, swimmers, boat owners, 4×4 drivers) dispatched in seconds. ResQ complements 112.</p>
@@ -140,14 +160,14 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/15"><Icon.AlertTriangle size={30} /></div>
         </button>
 
-        <Link href="/helper" className="card-shadow mb-4 flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white p-5 transition-transform active:scale-[.99]">
+        <button onClick={toHelper} className="card-shadow mb-4 flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white p-5 text-left transition-transform active:scale-[.99]">
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-resq-slate">Community helper</p>
             <p className="font-display text-xl font-bold text-resq-navy">I CAN HELP</p>
             <p className="mt-1 text-sm text-resq-slate">Offer your skills and go on duty</p>
           </div>
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-resq-green-light"><Icon.Shield size={28} className="text-resq-green" /></div>
-        </Link>
+        </button>
 
         <div className="mb-4 grid grid-cols-3 gap-3 md:col-span-2 lg:col-span-1">
           <a href="tel:112" className="card-shadow flex flex-col items-center gap-2 rounded-2xl border border-slate-100 bg-white p-4">
@@ -204,7 +224,11 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
         </div>
       </Container>
       <Call112Bar />
-      <BottomNav active="home" />
+      <BottomNav active="home" guard={toHelper} />
+      {sheet && (
+        <LoginSheet reason={sheet.reason} onClose={() => setSheet(null)}
+          onDone={() => { const next = sheet.then; setSheet(null); setSignedIn(true); next(); }} />
+      )}
     </>
   );
 }

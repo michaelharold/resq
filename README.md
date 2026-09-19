@@ -227,7 +227,8 @@ npm test                                          # 35 unit tests (dispatch, wav
 
 | Screen | URL | Notes |
 |---|---|---|
-| Requester | `/` | No login. Pick a type and/or describe it (text or hold-to-speak). "It's me / Someone else" switches the curated guidance between victim and witness steps. |
+| Requester | `/` | No login for **Request help**, **Call 112** and **SMS**. Every other option (I can help, share location, helper pages) opens a phone + code sign-in sheet first. Accounts are saved locally to `.data/accounts.json` (no database), so they survive restarts. |
+| Requester (details) | `/` | No login. Pick a type and/or describe it (text or hold-to-speak). "It's me / Someone else" switches the curated guidance between victim and witness steps. |
 | Helper | `/helper` | Phone + OTP. Without Twilio credentials the code is shown on screen (simulated SMS). Go **On duty** to receive pings. |
 | Demo launcher | `/demo` | Opens phone-sized windows side by side. **Every window is a separate person** (identity is per window), so one laptop can run a requester and several helpers. |
 | Coordinator | `/ops` | Password `OPS_PASSWORD` (default `resq-ops`). Live map, escalations, coverage by skill, SMS log, and a **Simulate inbound SMS** box for `YES` / `NO` / `HELP …` without Twilio. |

@@ -6,6 +6,7 @@ import { Badge, BottomNav, Call112Bar, Container, NavBar, PhoneShell, ProgressBa
 import { SKILL_META, SkillPill, URGENCY_STYLE } from "@/components/skills";
 import { DEMO_RADIUS_KM, api, demoSpot, distanceKm, fmtDistance, getHelperToken, getPosition, setHelperToken, stepToward, windowStore, type LatLng } from "@/lib/client/api";
 import { LiveMap, type MapMarker } from "@/components/LiveMap";
+import { OtpForm } from "@/components/OtpForm";
 import { useSecondsLeft, useSnapshot } from "@/lib/client/sse";
 import { SKILLS, TYPE_LABELS } from "@/lib/taxonomy";
 import type { Helper, HelperView, IncomingCard, Skill } from "@/lib/types";
@@ -35,28 +36,6 @@ export default function HelperApp() {
 // ─── Login ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 function Login({ onDone }: { onDone: () => void }) {
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
-  const [sent, setSent] = useState(false);
-  const [devCode, setDevCode] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const send = async () => {
-    setBusy(true); setMsg(null);
-    const r = await api<{ devCode?: string }>("/api/auth/otp/send", { body: { phone } });
-    setBusy(false);
-    if (r.ok) { setSent(true); setDevCode(r.data.devCode ?? null); }
-    else if (r.error === "sms_failed") { setSent(true); setMsg("SMS failed. Ask the organiser for your code."); }
-    else setMsg(r.error === "phone_invalid" ? "Enter a valid mobile number." : r.error === "too_many_requests" ? `Wait ${String(r.data.retryAfterSec ?? 30)} s before asking again.` : `Could not send code (${r.error}).`);
-  };
-  const verify = async () => {
-    setBusy(true); setMsg(null);
-    const r = await api<{ token: string }>("/api/auth/otp/verify", { body: { phone, code } });
-    setBusy(false);
-    if (r.ok) { setHelperToken(r.data.token); onDone(); } else setMsg(r.error === "invalid_code" ? "That code is wrong or expired." : `Could not verify (${r.error}).`);
-  };
-
   return (
     <>
       <div className="bg-navy-gradient px-6 pb-10 pt-10 text-center md:pb-16">
@@ -74,23 +53,7 @@ function Login({ onDone }: { onDone: () => void }) {
       </div>
       <main className="relative z-10 mx-auto -mt-5 w-full max-w-md flex-1 px-5 md:-mt-10">
         <div className="card-shadow-lg rounded-2xl border border-slate-100 bg-white p-5">
-          <label htmlFor="phone" className="text-sm font-semibold text-resq-navy">Mobile number</label>
-          <input id="phone" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={sent}
-            placeholder="+91 98765 43210" className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 px-4 text-base outline-none focus:ring-2 focus:ring-resq-green/30 disabled:bg-slate-50" />
-          {sent && (
-            <>
-              <label htmlFor="code" className="mt-4 block text-sm font-semibold text-resq-navy">6-digit code</label>
-              <input id="code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                placeholder="••••••" className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 px-4 font-mono text-xl tracking-[.5em] outline-none focus:ring-2 focus:ring-resq-green/30" />
-              {devCode && <p className="mt-2 rounded-xl bg-resq-cyan-light p-2.5 text-xs text-resq-navy">Demo mode (no SMS configured): your code is <strong className="font-mono">{devCode}</strong></p>}
-            </>
-          )}
-          {msg && <p role="alert" className="mt-3 text-sm font-medium text-resq-red">{msg}</p>}
-          <button onClick={sent ? verify : send} disabled={busy || (!sent ? phone.trim().length < 10 : code.length !== 6)}
-            className="mt-4 min-h-14 w-full rounded-2xl bg-success-gradient font-display text-lg font-bold text-white shadow-lg disabled:opacity-50">
-            {busy ? "Please wait…" : sent ? "Verify & continue" : "Send code"}
-          </button>
-          {sent && <button onClick={() => { setSent(false); setCode(""); setDevCode(null); }} className="mt-2 min-h-12 w-full text-sm font-semibold text-resq-slate">Change number</button>}
+          <OtpForm onDone={() => onDone()} />
         </div>
       </main>
       <Call112Bar />

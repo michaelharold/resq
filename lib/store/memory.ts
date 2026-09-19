@@ -1,4 +1,10 @@
-/** In-process store. Reads and writes are structuredClone'd so callers never share references. */
+/**
+ * In-process store. Reads and writes are structuredClone'd so callers never share references.
+ * No database was purchased, so user accounts (helpers: name, phone, skills, reliability) are saved to a local
+ * JSON file when `persistPath` is set, and reloaded at boot. Requests and dispatches stay in memory.
+ */
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Dispatch, Helper, HelpRequest, LatLng, Otp, Rating } from "../types";
 import type { AcceptResult, Store } from "./index";
 import { seedHelpers } from "../../scripts/seed";
@@ -7,7 +13,8 @@ import { getSeedCenter } from "../dispatch";
 const c = structuredClone;
 const OPEN = new Set(["triaging", "searching", "matched", "escalated"]);
 
-export type MemoryStoreOptions = { seed?: boolean; center?: LatLng; now?: Date };
+export type MemoryStoreOptions = { seed?: boolean; center?: LatLng; now?: Date; persistPath?: string | null };
+const SEEDED = /^seed-helper-/;
 
 export class MemoryStore implements Store {
   private helpers = new Map<string, Helper>();
@@ -15,14 +22,42 @@ export class MemoryStore implements Store {
   private dispatches = new Map<string, Dispatch>();
   private ratings = new Map<string, Rating>();
   private otps = new Map<string, Otp>();
+  private persistPath: string | null;
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: MemoryStoreOptions = {}) {
+    this.persistPath = opts.persistPath ?? null;
     if (opts.seed ?? process.env.SEED_ON_BOOT !== "0") {
       for (const h of seedHelpers(opts.center ?? getSeedCenter(), opts.now ?? new Date())) this.helpers.set(h.id, h);
     }
+    this.load();
   }
 
-  async upsertHelper(h: Helper) { this.helpers.set(h.id, c(h)); return c(h); }
+  private load() {
+    if (!this.persistPath) return;
+    try {
+      const saved = JSON.parse(readFileSync(this.persistPath, "utf8")) as { helpers?: Helper[] };
+      // Accounts come back off duty: nobody should be pinged until they reopen the app and go on duty again.
+      for (const h of saved.helpers ?? []) if (h && typeof h.id === "string" && !SEEDED.test(h.id)) this.helpers.set(h.id, { ...h, onDuty: false });
+      console.log(`[store] loaded ${saved.helpers?.length ?? 0} accounts from ${this.persistPath}`);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") console.error("[store] could not load accounts", e);
+    }
+  }
+  private save() {
+    if (!this.persistPath || this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      try {
+        const helpers = [...this.helpers.values()].filter((h) => !SEEDED.test(h.id));
+        mkdirSync(dirname(this.persistPath!), { recursive: true });
+        writeFileSync(this.persistPath + ".tmp", JSON.stringify({ savedAt: new Date().toISOString(), helpers }, null, 2));
+        renameSync(this.persistPath + ".tmp", this.persistPath!); // atomic replace
+      } catch (e) { console.error("[store] save failed", e); }
+    }, 300);
+  }
+
+  async upsertHelper(h: Helper) { this.helpers.set(h.id, c(h)); this.save(); return c(h); }
   async getHelper(id: string) { const h = this.helpers.get(id); return h ? c(h) : null; }
   async getHelperByPhone(phone: string) {
     for (const h of this.helpers.values()) if (h.phone === phone) return c(h);
@@ -36,6 +71,7 @@ export class MemoryStore implements Store {
     h.onDuty = onDuty;
     if (location !== undefined) h.location = location;
     h.lastSeen = new Date().toISOString();
+    this.save();
     return c(h);
   }
 

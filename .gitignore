@@ -18,3 +18,6 @@ npm-debug.log*
 .DS_Store
 *.tsbuildinfo
 .test-dist/
+
+# local account storage (no database purchased)
+.data/
