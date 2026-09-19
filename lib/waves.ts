@@ -98,6 +98,10 @@ export async function createHelpRequest(input: NewRequestInput): Promise<HelpReq
     matchedHelperId: null, createdAt: now, updatedAt: now,
   });
   emit("request:updated", { request: created });
+  if (input.requesterPhone && input.location) {
+    await store.recordLocation({ phone: input.requesterPhone, name: input.requesterName ?? null, helperId: input.requesterHelperId,
+      location: input.location, accuracyM: null, source: "request", updatedAt: now });
+  }
   const t = await triage(input.description);
   const withTriage = (await store.updateRequest(created.id, { triage: t })) as HelpRequest;
   emit("request:updated", { request: withTriage });

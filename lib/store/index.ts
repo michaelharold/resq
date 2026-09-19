@@ -3,7 +3,7 @@
  * layer was purchased (Firebase bid lost). Additions to the README interface: getHelperByPhone (OTP + inbound SMS),
  * listHelpers (ops map), getDispatch (respond), saveRating (§3 "gets rated").
  */
-import type { Dispatch, Helper, HelpRequest, LatLng, Otp, Rating, StoreErrorReason } from "../types";
+import type { AuditEntry, Authority, Dispatch, Helper, HelpRequest, LatLng, Otp, Rating, StoreErrorReason, UserLocation, Zone } from "../types";
 import { MemoryStore } from "./memory";
 
 export type AcceptResult =
@@ -30,6 +30,18 @@ export interface Store {
   saveRating(r: Rating): Promise<Rating>;
   saveOtp(o: Otp): Promise<void>;
   verifyOtp(phone: string, code: string): Promise<boolean>;
+
+  // Disaster response (authorities)
+  recordLocation(u: Omit<UserLocation, "history">): Promise<UserLocation>;   // upsert by phone, appends to the 24 h trail
+  listLocations(): Promise<UserLocation[]>;
+  deleteLocation(phone: string): Promise<void>;
+  saveZone(z: Zone): Promise<Zone>;
+  listZones(): Promise<Zone[]>;
+  getAuthority(username: string): Promise<Authority | null>;
+  listAuthorities(): Promise<Authority[]>;
+  upsertAuthority(a: Authority): Promise<Authority>;
+  audit(e: AuditEntry): Promise<void>;
+  listAudit(): Promise<AuditEntry[]>;
 }
 
 const g = globalThis as unknown as { __resq_store?: Store };

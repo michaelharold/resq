@@ -7,6 +7,8 @@ import { SKILL_META, SkillPill, URGENCY_STYLE } from "@/components/skills";
 import { DEMO_RADIUS_KM, api, demoSpot, distanceKm, fmtDistance, getHelperToken, getPosition, setHelperToken, stepToward, windowStore, type LatLng } from "@/lib/client/api";
 import { LiveMap, type MapMarker } from "@/components/LiveMap";
 import { OtpForm } from "@/components/OtpForm";
+import { BeaconChip } from "@/components/BeaconChip";
+import { useLocationBeacon } from "@/lib/client/beacon";
 import { useSecondsLeft, useSnapshot } from "@/lib/client/sse";
 import { SKILLS, TYPE_LABELS } from "@/lib/taxonomy";
 import type { Helper, HelperView, IncomingCard, Skill } from "@/lib/types";
@@ -133,6 +135,7 @@ function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () 
   const pos = useRef<LatLng | null>(helper.location);
   pos.current = helper.location ?? pos.current;
   useEffect(() => { void api<{ seedCenter: LatLng }>("/api/config").then((r) => r.ok && setCenter(r.data.seedCenter)); }, []);
+  const beacon = useLocationBeacon(true, center);
 
   // New ping: vibrate, beep, and flag the tab title.
   useEffect(() => {
@@ -280,6 +283,7 @@ function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () 
             <button onClick={() => changeLoc("gps")} aria-pressed={mode === "gps"} className={`min-h-11 rounded-xl border-2 text-sm font-semibold ${mode === "gps" ? "border-resq-navy bg-resq-navy text-white" : "border-slate-200 text-resq-navy"}`}>Use GPS</button>
             <button onClick={() => changeLoc("demo", mode === "demo")} className={`min-h-11 rounded-xl border-2 text-sm font-semibold ${mode === "demo" ? "border-resq-navy bg-resq-navy text-white" : "border-slate-200 text-resq-navy"}`}>{mode === "demo" ? "New demo spot" : "Demo spot"}</button>
           </div>
+          <div className="mt-3"><BeaconChip paused={beacon.paused} ago={beacon.ago} source={beacon.source} onToggle={(p) => void beacon.setPaused(p)} /></div>
           <p className="mt-2 text-xs text-resq-slate">Demo spots are 200–900 m from TKMCE, different in every window, and travel towards the emergency once you accept.</p>
         </section>
         <button onClick={logout} className="min-h-12 w-full rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-resq-slate">Sign out</button>

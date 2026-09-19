@@ -43,6 +43,10 @@ export function OtpForm({ onDone, cta = "Verify & continue" }: { onDone: (helper
         </>
       )}
       {msg && <p role="alert" className="mt-3 text-sm font-medium text-resq-red">{msg}</p>}
+      <p className="mt-3 text-xs leading-snug text-resq-slate">
+        While signed in, ResQ shares your location every 30 s with verified authorities so they can find you if a disaster
+        zone (landslide, flood…) is declared around you. You can pause it any time.
+      </p>
       <button type="submit" disabled={busy || (!sent ? phone.trim().length < 10 : code.length !== 6)}
         className="mt-4 min-h-14 w-full rounded-2xl bg-success-gradient font-display text-lg font-bold text-white shadow-lg disabled:opacity-50">
         {busy ? "Please wait…" : sent ? cta : "Send code"}

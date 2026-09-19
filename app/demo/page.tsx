@@ -17,7 +17,7 @@ export default function DemoPage() {
   const [slot, setSlot] = useState(0);
   const next = () => { const s = slot; setSlot((x) => (x + 1) % 4); return s; };
   const steps = [
-    { n: 1, t: "Coordinator: switch seeded helpers off", d: "In /ops, press “Seeded helpers off” so only your helper windows can receive pings. Keep it open to watch everything live." },
+    { n: 1, t: "Coordinator: switch seeded helpers off", d: "In /ops (coordinator / resq-ops), press “Seeded helpers off” so only your helper windows can receive pings. Keep it open to watch everything live." },
     { n: 2, t: "Open 2–3 helper windows", d: "In each: enter any 10-digit number (e.g. 98765 00001, …02), type the on-screen demo code, add skills (Swimmer + Boat owner for a flood demo) and switch On duty." },
     { n: 3, t: "Open a requester window", d: "Tap REQUEST HELP, say or type e.g. “Water is rising, my grandmother can't walk”, add a name/phone and send." },
     { n: 4, t: "Watch the dispatch", d: "Every helper window beeps and shows the request with a 30 s countdown. One Declines, another Accepts: the rest are stood down instantly." },
@@ -34,7 +34,7 @@ export default function DemoPage() {
 
         <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            { label: "Coordinator", sub: "Password: resq-ops", icon: <Icon.Activity size={22} />, cls: "bg-resq-cyan", path: "/ops", wide: true },
+            { label: "Coordinator", sub: "Login: coordinator / resq-ops", icon: <Icon.Activity size={22} />, cls: "bg-resq-cyan", path: "/ops", wide: true },
             { label: "Helper window", sub: "Open 2–3 of these", icon: <Icon.Shield size={22} />, cls: "bg-resq-green", path: "/helper" },
             { label: "Requester window", sub: "The person in trouble", icon: <Icon.AlertTriangle size={22} />, cls: "bg-resq-red", path: "/" },
           ].map((b) => (

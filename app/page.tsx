@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LoginSheet } from "@/components/OtpForm";
+import { BeaconChip } from "@/components/BeaconChip";
+import { useLocationBeacon } from "@/lib/client/beacon";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { Badge, BottomNav, Call112Bar, Container, Countdown, ETABadge, Logo, NavBar, PhoneShell, ProgressBar, PulsingDot, TopNav, TypingDots, initials } from "@/components/ui";
@@ -76,6 +78,7 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
   const [signedIn, setSignedIn] = useState(false);
   const [sheet, setSheet] = useState<{ reason: string; then: () => void } | null>(null);
   useEffect(() => { setSignedIn(!!getHelperToken()); }, []);
+  const beacon = useLocationBeacon(signedIn, config?.seedCenter ?? null);
   const gate = (reason: string, then: () => void) => (getHelperToken() ? then() : setSheet({ reason, then }));
   const toHelper = () => gate("Helpers sign in with their phone so neighbours know who is coming.", () => router.push("/helper"));
   const signOut = async () => { await api("/api/auth/logout", { method: "POST", body: {} }); setHelperToken(null); setSignedIn(false); };
@@ -134,6 +137,7 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
               <TopNav active="home" guard={toHelper} />
             </div>
           </div>
+          {signedIn && <div className="mt-3 max-w-md"><BeaconChip light paused={beacon.paused} ago={beacon.ago} source={beacon.source} onToggle={(p) => void beacon.setPaused(p)} /></div>}
           <p className="mt-6 hidden max-w-md font-display text-4xl font-bold leading-tight text-white lg:block">Help is closer than you think.</p>
           <p className="mt-3 hidden max-w-md text-white/60 lg:block">Skilled neighbours (doctors, nurses, swimmers, boat owners, 4×4 drivers) dispatched in seconds. ResQ complements 112.</p>
           </div>

@@ -142,3 +142,18 @@ export type OpsView = {
 };
 
 export type StoreErrorReason = "already_matched" | "expired" | "not_found";
+
+// ─── Disaster response (authorities) ─────────────────────────────────────────────────────────────────────────
+
+export type PingSource = "gps" | "demo" | "request" | "seed";
+/** Last known location of a person (signed-in user, helper, or SMS/app requester), keyed by phone. */
+export type UserLocation = {
+  phone: string; name: string | null; helperId: string | null;
+  location: LatLng; accuracyM: number | null; source: PingSource; updatedAt: string;
+  history: { lat: number; lng: number; at: string }[]; // last 24 h, oldest first, thinned to one point per minute
+};
+export type ZoneKind = "landslide" | "flood" | "fire" | "building_collapse" | "cyclone" | "other";
+export type Zone = { id: string; name: string; kind: ZoneKind; center: LatLng; radiusKm: number; createdAt: string; createdBy: string; active: boolean };
+export type AuthorityRole = "admin" | "officer";
+export type Authority = { username: string; name: string; role: AuthorityRole; passwordHash: string; createdAt: string };
+export type AuditEntry = { at: string; user: string; action: string; detail: string };

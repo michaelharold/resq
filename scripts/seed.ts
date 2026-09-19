@@ -4,7 +4,7 @@
  * than a real demo phone (reliability 0.5–0.65, lastSeen −15 min, never every flood/evacuation skill, none
  * within 150 m) so demo phones registered at the venue land in wave 1's top 3.
  */
-import type { Helper, LatLng, Skill } from "../lib/types";
+import type { Helper, LatLng, Skill, UserLocation } from "../lib/types";
 
 const NAMES = ["Anjali Nair", "Faizal Rahman", "Reshma Pillai", "Sreekumar V", "Fathima Beevi", "Vishnu Prasad",
   "Divya Menon", "Joseph Thomas", "Nimmy George", "Rahul Krishnan", "Athira S", "Shaji Mathew", "Lekshmi Devi",
@@ -52,6 +52,28 @@ export function seedHelpers(center: LatLng, now: Date): Helper[] {
       onDuty: true,
       reliability: +(0.5 + rnd() * 0.15).toFixed(3),
       lastSeen,
+    };
+  });
+}
+
+const FIRST = ["Aarav", "Diya", "Kiran", "Lakshmi", "Manu", "Neha", "Omana", "Pranav", "Rani", "Sajan", "Tessa", "Unni",
+  "Varsha", "Abdul", "Bindu", "Chandran", "Devika", "Eldho", "Gayathri", "Hari"];
+const LAST = ["Nair", "Pillai", "Kurian", "Menon", "Varghese", "Rahman", "Das", "Thomas", "Iyer", "Joseph"];
+
+/** 60 synthetic residents who share their location, so a disaster zone has people to find in a demo. */
+export function seedResidents(center: LatLng, now: Date): UserLocation[] {
+  const rnd = mulberry32(424242);
+  return Array.from({ length: 60 }, (_, i) => {
+    const km = 0.1 + rnd() * 3.5, b = rnd() * 2 * Math.PI;
+    const location = {
+      lat: +(center.lat + (km / 111.32) * Math.cos(b)).toFixed(6),
+      lng: +(center.lng + (km / (111.32 * Math.cos((center.lat * Math.PI) / 180))) * Math.sin(b)).toFixed(6),
+    };
+    const updatedAt = new Date(now.getTime() - Math.floor(rnd() * 20) * 60_000).toISOString();
+    return {
+      phone: `+9191100000${String(i + 1).padStart(2, "0")}`, name: `${FIRST[i % FIRST.length]} ${LAST[(i * 7) % LAST.length]}`,
+      helperId: null, location, accuracyM: Math.round(8 + rnd() * 40), source: "seed" as const, updatedAt,
+      history: [{ ...location, at: updatedAt }],
     };
   });
 }
