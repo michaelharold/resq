@@ -42,6 +42,7 @@ export type TriageResult = {
 };
 
 export type RequestStatus = "triaging" | "searching" | "matched" | "resolved" | "escalated" | "cancelled";
+export type RequesterRole = "self" | "other";
 export type LocationSource = "gps" | "landmark" | "none";
 
 export type HelpRequest = {
@@ -56,6 +57,7 @@ export type HelpRequest = {
   locationSource: LocationSource;
   landmark: string | null;
   channel: Channel;
+  role: RequesterRole; // "self" = the requester is the person in trouble; "other" = a witness/bystander
   triage: TriageResult | null;
   status: RequestStatus;
   wave: number; // 0 before dispatch starts, 1..4 while searching
@@ -97,6 +99,7 @@ export type GuidanceCard = {
   doNot: string[];
   call112When: string[];
   source: string;
+  selfSteps: string[]; // shown when the person describing it IS the person in trouble (role "self")
 };
 
 /** Public projection of a dispatch for the requester: no helper name/phone. */

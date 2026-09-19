@@ -15,9 +15,11 @@ export const POST = safe(async (req: Request) => {
   const loc = body.value.location;
   if (loc !== undefined && loc !== null && !isLatLng(loc)) return jsonError(400, "location_invalid");
   const location = isLatLng(loc) ? loc : null;
+  const role = body.value.role;
+  if (role !== undefined && role !== "self" && role !== "other") return jsonError(400, "role_invalid");
   const r = await createHelpRequest({
     requesterId, requesterPhone: null, requesterHelperId: getHelperSession(req)?.helperId ?? null, description,
-    location, locationSource: location ? "gps" : "none", landmark: null, channel: "app",
+    location, locationSource: location ? "gps" : "none", landmark: null, channel: "app", role,
   });
   return json(await buildRequestView(r.id), 201);
 });

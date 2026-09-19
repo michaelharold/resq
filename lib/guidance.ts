@@ -22,7 +22,7 @@ import type { GuidanceCard, NeedType } from "./types";
 export const GUIDANCE_DISCLAIMER =
   "Curated first-aid guidance. Not a substitute for 112 or a medical professional.";
 
-export const GUIDANCE: Record<NeedType, GuidanceCard> = {
+const CARDS: Record<NeedType, Omit<GuidanceCard, "selfSteps">> = {
   cardiac_no_breathing: {
     type: "cardiac_no_breathing",
     title: "Not breathing / cardiac arrest",
@@ -305,6 +305,42 @@ export const GUIDANCE: Record<NeedType, GuidanceCard> = {
 };
 
 /** The static card for a need type. Total: never throws, since `GUIDANCE` covers every NeedType. */
+/**
+ * Curated steps for when the requester IS the person in trouble (victim), not a bystander. Same sources and
+ * rules as the witness steps: static text, no doses, first step is the most important action.
+ */
+const SELF_STEPS: Record<NeedType, string[]> = {
+  flood_rescue: ["Move to the highest floor or roof now.", "Do not walk or drive through moving water.",
+    "Switch off the mains power if you can do it safely.", "Signal with a torch, phone light or bright cloth.",
+    "Save phone battery and keep it dry."],
+  cardiac_no_breathing: ["Stop what you are doing and sit or lie down now.", "Call 112 or ask anyone nearby to call.",
+    "Unlock your door so help can get in.", "Loosen tight clothing and keep your phone in your hand.",
+    "Tell anyone near you that you may need CPR."],
+  bleeding: ["Press firmly on the wound with a clean cloth.", "Keep pressing. Don't lift it to check.",
+    "Sit or lie down so you don't faint.", "Raise the injured part if you can.", "Don't pull out anything stuck in the wound."],
+  fracture: ["Stay still and don't put weight on the injury.", "Support the injured part in the position you found it.",
+    "Hold a cold pack wrapped in cloth against it.", "Don't eat or drink in case you need surgery."],
+  electrical: ["Move away from the wire or appliance only if you can do it safely.", "Don't touch anything wet or metal.",
+    "Sit down: a shock can affect your heart even if you feel fine.", "Cool any burn under clean running water for 20 minutes."],
+  fire: ["Get out now and stay out.", "Stay low, under the smoke.", "Feel doors before opening. If hot, use another way.",
+    "If your clothes catch fire: stop, drop and roll.", "If trapped, close the door, block gaps and signal from a window."],
+  trapped_structural: ["Stay still so you don't bring debris down.", "Cover your mouth and nose with cloth.",
+    "Tap on a pipe or wall so rescuers can hear you.", "Shout only as a last resort to save breath.", "Text instead of calling to save battery."],
+  snakebite: ["Keep as still and calm as you can.", "Keep the bitten limb still and below heart level.",
+    "Remove rings, watches and tight clothing near the bite.", "Note the time of the bite.", "Don't cut, suck, ice or tie the bite."],
+  evacuation_mobility: ["Stay where you are and tell us exactly where.", "Gather medicines, documents, phone and charger.",
+    "Move to the highest safe floor if you can.", "Keep warm and dry; signal with a light.", "Don't use lifts."],
+  supplies_oxygen_meds: ["Sit upright and breathe slowly if you are breathless.", "List exactly what you need and how much.",
+    "Photograph your prescription.", "Use your remaining supply sparingly until help arrives."],
+  missing_person: ["If you are lost, stay where you are if it is safe.", "Call or text someone you know.",
+    "Stay visible and near a landmark.", "Save phone battery."],
+  other: ["Move to a safe place if you can.", "Tell us what you see and where you are.", "Keep your phone on and near you."],
+};
+
+export const GUIDANCE: Record<NeedType, GuidanceCard> = Object.fromEntries(
+  (Object.keys(CARDS) as NeedType[]).map((t) => [t, { ...CARDS[t], selfSteps: SELF_STEPS[t] }]),
+) as Record<NeedType, GuidanceCard>;
+
 export function getGuidance(type: NeedType): GuidanceCard {
   return GUIDANCE[type];
 }

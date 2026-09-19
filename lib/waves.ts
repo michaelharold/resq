@@ -10,7 +10,8 @@ import { getStore } from "./store";
 import { MAX_WAVES, TICK_GRACE_MS, WAVE_RADII_KM, selectWave, waveWindowMs } from "./dispatch";
 import { mapsUrl, sendSms, tplPing, tplRequesterEscalated, tplRequesterMatched } from "./sms";
 import { triage } from "./triage";
-import type { Channel, Dispatch, Helper, HelpRequest, LatLng, LocationSource, StoreErrorReason } from "./types";
+import { inferRole } from "./role";
+import type { Channel, Dispatch, Helper, HelpRequest, LatLng, LocationSource, RequesterRole, StoreErrorReason } from "./types";
 
 const g = globalThis as unknown as { __resq_locks?: Map<string, Promise<unknown>> };
 const locks = (g.__resq_locks ??= new Map());
@@ -83,14 +84,14 @@ async function expirePinged(id: string): Promise<void> {
 
 export type NewRequestInput = {
   requesterId: string; requesterPhone: string | null; requesterHelperId: string | null; description: string;
-  location: LatLng | null; locationSource: LocationSource; landmark: string | null; channel: Channel;
+  location: LatLng | null; locationSource: LocationSource; landmark: string | null; channel: Channel; role?: RequesterRole;
 };
 
 export async function createHelpRequest(input: NewRequestInput): Promise<HelpRequest> {
   const store = getStore();
   const now = nowIso();
   const created = await store.createRequest({
-    id: randomUUID(), ...input, triage: null, status: "triaging", wave: 0, radiusKm: 0, waveStartedAt: null,
+    id: randomUUID(), ...input, role: input.role ?? inferRole(input.description), triage: null, status: "triaging", wave: 0, radiusKm: 0, waveStartedAt: null,
     matchedHelperId: null, createdAt: now, updatedAt: now,
   });
   emit("request:updated", { request: created });
