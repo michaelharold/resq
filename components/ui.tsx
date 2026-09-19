@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Icon } from "./icons";
 
 export function PhoneShell({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-slate-50 shadow-xl">{children}</div>;
+  return <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-slate-50 shadow-xl md:max-w-none md:shadow-none">{children}</div>;
 }
 
 export function NavBar({ title, onBack, backHref, light = false, action }: {
@@ -116,7 +116,7 @@ export function BottomNav({ active }: { active: "home" | "helper" }) {
     { id: "helper", href: "/helper", label: "I can help", icon: <Icon.Shield size={22} /> },
   ] as const;
   return (
-    <nav className="flex justify-around border-t border-slate-100 bg-white px-6 pb-4 pt-2">
+    <nav className="flex justify-around border-t border-slate-100 bg-white px-6 pb-4 pt-2 md:hidden">
       {items.map((i) => (
         <Link key={i.id} href={i.href} className={`flex min-h-12 flex-col items-center gap-1 rounded-xl px-4 py-1 ${active === i.id ? "text-resq-red" : "text-resq-slate"}`}>
           {i.icon}<span className="text-xs font-medium">{i.label}</span>
@@ -128,4 +128,25 @@ export function BottomNav({ active }: { active: "home" | "helper" }) {
 
 export function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase() ?? "").join("");
+}
+
+/** Wide-screen navigation (the bottom nav is phone-only). */
+export function TopNav({ active, light = true }: { active: "home" | "helper"; light?: boolean }) {
+  const items = [{ id: "home", href: "/", label: "Get help" }, { id: "helper", href: "/helper", label: "I can help" }] as const;
+  return (
+    <nav className="hidden items-center gap-1 md:flex" aria-label="Main">
+      {items.map((i) => (
+        <Link key={i.id} href={i.href} aria-current={active === i.id ? "page" : undefined}
+          className={`flex min-h-10 items-center whitespace-nowrap rounded-xl px-4 text-sm font-semibold ${active === i.id
+            ? (light ? "bg-white/15 text-white" : "bg-resq-navy text-white") : (light ? "text-white/70 hover:text-white" : "text-resq-slate hover:text-resq-navy")}`}>
+          {i.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** Centres page content and caps its width on large screens. */
+export function Container({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <div className={`mx-auto w-full max-w-6xl ${className}`}>{children}</div>;
 }

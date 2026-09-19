@@ -2,7 +2,7 @@
 /* Helper app: phone + OTP → skills profile → on duty (shares location) → incoming pings → active job. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
-import { Badge, BottomNav, Call112Bar, NavBar, PhoneShell, ProgressBar, PulsingDot, initials } from "@/components/ui";
+import { Badge, BottomNav, Call112Bar, Container, NavBar, PhoneShell, ProgressBar, PulsingDot, TopNav, initials } from "@/components/ui";
 import { SKILL_META, SkillPill, URGENCY_STYLE } from "@/components/skills";
 import { api, fmtDistance, getPosition } from "@/lib/client/api";
 import { useSecondsLeft, useSnapshot } from "@/lib/client/sse";
@@ -58,14 +58,15 @@ function Login({ onDone }: { onDone: () => void }) {
 
   return (
     <>
-      <div className="bg-navy-gradient px-6 pb-10 pt-10 text-center">
+      <div className="bg-navy-gradient px-6 pb-10 pt-10 text-center md:pb-16">
+        <Container className="mb-4 hidden justify-end md:flex"><TopNav active="helper" /></Container>
         <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-resq-green shadow-2xl" style={{ boxShadow: "0 0 50px rgba(22,163,74,.35)" }}>
           <Icon.Shield size={40} className="text-white" />
         </div>
         <h1 className="font-display text-3xl font-bold text-white">Become a ResQ helper</h1>
         <p className="mt-2 text-sm text-white/70">Your skills can save a neighbour. Sign in with your phone to go on duty.</p>
       </div>
-      <main className="relative z-10 -mt-5 flex-1 px-5">
+      <main className="relative z-10 mx-auto -mt-5 w-full max-w-md flex-1 px-5 md:-mt-10">
         <div className="card-shadow-lg rounded-2xl border border-slate-100 bg-white p-5">
           <label htmlFor="phone" className="text-sm font-semibold text-resq-navy">Mobile number</label>
           <input id="phone" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={sent}
@@ -109,15 +110,15 @@ function Profile({ phone, helper, onSaved, onCancel }: { phone: string; helper?:
   return (
     <>
       <div className="bg-success-gradient">
-        <NavBar title={helper ? "Edit skills" : "Your skills"} onBack={onCancel} light />
-        <p className="px-5 pb-5 text-sm text-white/85">Tell neighbours what you can do. We only ping you for emergencies that match.</p>
+        <Container><NavBar title={helper ? "Edit skills" : "Your skills"} onBack={onCancel} light /></Container>
+        <p className="mx-auto max-w-4xl px-5 pb-5 text-sm text-white/85">Tell neighbours what you can do. We only ping you for emergencies that match.</p>
       </div>
-      <main className="flex-1 px-5 py-4">
+      <main className="mx-auto w-full max-w-4xl flex-1 px-5 py-4">
         <label htmlFor="name" className="text-sm font-semibold text-resq-navy">Your name</label>
         <input id="name" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoComplete="name"
-          className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none focus:ring-2 focus:ring-resq-green/30" />
+          className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none focus:ring-2 focus:ring-resq-green/30 md:max-w-md" />
         <p className="mb-2 mt-5 text-sm font-semibold text-resq-navy">Skills & resources <span className="font-normal text-resq-slate">({skills.length} selected)</span></p>
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
           {SKILLS.map((s) => {
             const m = SKILL_META[s];
             const on = skills.includes(s);
@@ -137,7 +138,7 @@ function Profile({ phone, helper, onSaved, onCancel }: { phone: string; helper?:
         <p className="mt-3 text-xs text-resq-slate">Skills are self-declared. Ratings from the people you help build your reliability score.</p>
         {msg && <p role="alert" className="mt-3 text-sm font-medium text-resq-red">{msg}</p>}
         <button onClick={save} disabled={busy || !name.trim() || skills.length === 0}
-          className="mt-4 min-h-14 w-full rounded-2xl bg-success-gradient font-display text-lg font-bold text-white shadow-lg disabled:opacity-50">
+          className="mt-4 min-h-14 w-full rounded-2xl bg-success-gradient font-display text-lg font-bold text-white shadow-lg disabled:opacity-50 md:max-w-xs">
           {busy ? "Saving…" : "Save"}
         </button>
       </main>
@@ -202,8 +203,8 @@ function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () 
   return (
     <>
       <div className="bg-navy-gradient">
-        <div className="px-5 pb-6 pt-5">
-          <div className="flex items-start justify-between">
+        <Container className="px-5 pb-6 pt-5 md:px-8">
+          <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-resq-cyan to-resq-navy font-bold text-white">{initials(helper.name)}</div>
               <div>
@@ -211,12 +212,15 @@ function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () 
                 <h1 className="font-display text-xl font-bold text-white">{helper.name}</h1>
               </div>
             </div>
-            <span className="flex items-center gap-1.5 rounded-xl bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-white">
-              <PulsingDot color={connected ? "green" : "red"} />{connected ? "Live" : "Offline"}
-            </span>
+            <div className="flex items-center gap-2">
+              <TopNav active="helper" />
+              <span className="flex items-center gap-1.5 rounded-xl bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-white">
+                <PulsingDot color={connected ? "green" : "red"} />{connected ? "Live" : "Offline"}
+              </span>
+            </div>
           </div>
           <button onClick={toggleDuty} aria-pressed={helper.onDuty}
-            className={`mt-5 flex min-h-16 w-full items-center justify-between rounded-2xl px-5 text-left transition-all ${helper.onDuty ? "bg-resq-green" : "bg-white/10"}`}>
+            className={`mt-5 flex min-h-16 w-full items-center justify-between rounded-2xl px-5 text-left transition-all md:max-w-md ${helper.onDuty ? "bg-resq-green" : "bg-white/10"}`}>
             <div>
               <p className="font-display text-lg font-bold text-white">{helper.onDuty ? "On duty" : "Off duty"}</p>
               <p className="text-xs text-white/75">{helper.onDuty ? "Sharing your location · you will get pings" : "Tap to start receiving emergency pings"}</p>
@@ -226,10 +230,11 @@ function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () 
             </div>
           </button>
           {locMsg && <p className="mt-2 text-xs text-amber-300">{locMsg}</p>}
-        </div>
+        </Container>
       </div>
 
-      <main className="flex flex-1 flex-col gap-4 px-4 py-4">
+      <main className="mx-auto grid w-full max-w-6xl flex-1 content-start gap-4 px-4 py-4 md:px-8 lg:grid-cols-[1.4fr_1fr] lg:items-start">
+        <div className="flex flex-col gap-4">
         {taken && (
           <div className="flex items-center gap-2 rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white animate-fade-in">
             <Icon.AlertTriangle size={16} />{taken}
@@ -245,6 +250,8 @@ function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () 
             <p className="mt-1 text-sm text-resq-slate">{helper.onDuty ? "Keep this page open. You will also get an SMS when pinged." : "Go on duty to help neighbours nearby."}</p>
           </div>
         )}
+        </div>
+        <div className="flex flex-col gap-4">
 
         <section className="card-shadow rounded-2xl border border-slate-100 bg-white p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -258,6 +265,7 @@ function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () 
           </div>
         </section>
         <button onClick={logout} className="min-h-12 w-full rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-resq-slate">Sign out</button>
+        </div>
       </main>
       <Call112Bar />
       <BottomNav active="helper" />

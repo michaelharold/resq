@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
-import { Badge, BottomNav, Call112Bar, Countdown, ETABadge, Logo, NavBar, PhoneShell, ProgressBar, PulsingDot, TypingDots, initials } from "@/components/ui";
+import { Badge, BottomNav, Call112Bar, Container, Countdown, ETABadge, Logo, NavBar, PhoneShell, ProgressBar, PulsingDot, TopNav, TypingDots, initials } from "@/components/ui";
 import { EMERGENCY_TILES, SKILL_META, SkillPill, URGENCY_STYLE } from "@/components/skills";
 import { LiveMap, type MapMarker } from "@/components/LiveMap";
 import { api, etaMinutes, fmtDistance, fmtTime, getPosition, getUid, type LatLng } from "@/lib/client/api";
@@ -86,7 +86,8 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
   return (
     <>
       <div className="bg-navy-gradient">
-        <div className="px-5 pb-8 pt-5">
+        <Container className="px-5 pb-8 pt-5 md:px-8 lg:grid lg:grid-cols-[1fr_1.1fr] lg:items-center lg:gap-10 lg:pb-14 lg:pt-8">
+          <div>
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2">
@@ -100,12 +101,16 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
                 </span>
               </div>
             </div>
-            <Link href="/helper" className="flex min-h-12 items-center gap-1.5 rounded-xl border border-white/20 px-3 text-xs font-semibold text-white">
+            <Link href="/helper" className="flex min-h-12 items-center gap-1.5 rounded-xl border border-white/20 px-3 text-xs font-semibold text-white md:hidden">
               <Icon.Shield size={14} />Helper
             </Link>
+            <TopNav active="home" />
           </div>
-          <div className="relative mt-5 overflow-hidden rounded-2xl">
-            {loc ? <LiveMap center={loc.at} radiusKm={2.2} rings={[1, 2]} markers={markers} height={160} />
+          <p className="mt-6 hidden max-w-md font-display text-4xl font-bold leading-tight text-white lg:block">Help is closer than you think.</p>
+          <p className="mt-3 hidden max-w-md text-white/60 lg:block">Skilled neighbours (doctors, nurses, swimmers, boat owners, 4×4 drivers) dispatched in seconds. ResQ complements 112.</p>
+          </div>
+          <div className="relative mt-5 overflow-hidden rounded-2xl lg:mt-0">
+            {loc ? <LiveMap center={loc.at} radiusKm={2.2} rings={[1, 2]} markers={markers} height={160} className="md:!h-[260px] lg:!h-[320px]" />
               : <div className="flex h-40 items-center justify-center rounded-2xl bg-white/10 text-sm text-white/60">Finding your location…</div>}
             {nearby && (
               <div className="absolute right-3 top-3 rounded-xl border border-slate-100 bg-white px-2.5 py-1 shadow">
@@ -113,11 +118,11 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
               </div>
             )}
           </div>
-        </div>
+        </Container>
       </div>
 
-      <main className="relative z-10 -mt-5 flex-1 px-5 pb-4">
-        <button onClick={onRequest} className="mb-3 flex w-full items-center justify-between rounded-2xl bg-emergency-gradient p-5 text-left text-white shadow-lg transition-transform active:scale-[.99]"
+      <Container className="relative z-10 -mt-5 flex-1 px-5 pb-4 md:grid md:grid-cols-2 md:items-start md:gap-x-5 md:px-8 lg:-mt-8 lg:grid-cols-3">
+        <button onClick={onRequest} className="mb-3 flex w-full md:mb-4 items-center justify-between rounded-2xl bg-emergency-gradient p-5 text-left text-white shadow-lg transition-transform active:scale-[.99]"
           style={{ boxShadow: "0 8px 32px rgba(220,38,38,.3)" }}>
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-white/70">Need help?</p>
@@ -136,7 +141,7 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-resq-green-light"><Icon.Shield size={28} className="text-resq-green" /></div>
         </Link>
 
-        <div className="mb-4 grid grid-cols-3 gap-3">
+        <div className="mb-4 grid grid-cols-3 gap-3 md:col-span-2 lg:col-span-1">
           <a href="tel:112" className="card-shadow flex flex-col items-center gap-2 rounded-2xl border border-slate-100 bg-white p-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-resq-red-light"><Icon.Phone size={20} className="text-resq-red" /></div>
             <div className="text-center"><p className="text-sm font-semibold leading-none text-resq-navy">112</p><p className="mt-0.5 text-xs text-resq-slate">Emergency</p></div>
@@ -158,7 +163,7 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
           )}
         </div>
 
-        <section className="card-shadow mb-4 rounded-2xl border border-slate-100 bg-white p-4">
+        <section className="card-shadow mb-4 rounded-2xl border border-slate-100 bg-white p-4 md:col-span-2">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-display font-semibold text-resq-navy">Helpers nearby</h2>
             <Badge variant="success">{nearby?.count ?? 0} on duty</Badge>
@@ -182,14 +187,14 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
           ) : <p className="text-sm text-resq-slate">No helpers on duty near you right now. Call 112.</p>}
         </section>
 
-        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-3.5">
+        <div className="mb-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-3.5 md:col-span-2 lg:col-span-1">
           <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100"><Icon.Radio size={15} className="text-amber-700" /></div>
           <p className="text-xs leading-snug text-amber-800">
             <strong>No mobile data?</strong> Text <strong>HELP</strong> followed by what happened and where
             {config?.smsNumber ? <> to <strong>{config.smsNumber}</strong></> : null}, e.g. “HELP trapped near TKMCE hostel”.
           </p>
         </div>
-      </main>
+      </Container>
       <Call112Bar />
       <BottomNav active="home" />
     </>
@@ -243,8 +248,8 @@ function Report({ loc, onBack, onCreated }: { loc: Loc | null; onBack: () => voi
   return (
     <>
       <div className="bg-emergency-gradient">
-        <NavBar title="Report emergency" onBack={onBack} light />
-        <div className="px-5 pb-5">
+        <Container><NavBar title="Report emergency" onBack={onBack} light /></Container>
+        <Container className="max-w-3xl px-5 pb-5">
           <p className="text-sm text-white/85">Say or type what is happening. AI works out the help you need and pings the 3 best-placed neighbours at once.</p>
           <div className="mt-4 flex gap-2 rounded-2xl bg-white/10 p-1">
             {(["text", "voice"] as const).map((m) => (
@@ -255,10 +260,10 @@ function Report({ loc, onBack, onCreated }: { loc: Loc | null; onBack: () => voi
               </button>
             ))}
           </div>
-        </div>
+        </Container>
       </div>
 
-      <main className="flex-1 overflow-y-auto px-5 py-4">
+      <main className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-5 py-4">
         {mode === "voice" && (
           <div className="flex flex-col items-center gap-5 py-4">
             {speech.supported ? (
@@ -290,7 +295,7 @@ function Report({ loc, onBack, onCreated }: { loc: Loc | null; onBack: () => voi
         {mode === "text" && (
           <>
             <p className="mb-3 text-xs font-medium text-resq-slate">Pick a type (optional), then describe it</p>
-            <div className="mb-4 grid grid-cols-2 gap-3">
+            <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {EMERGENCY_TILES.map((t) => (
                 <button key={t.id} onClick={() => setTile(tile === t.id ? null : t.id)} aria-pressed={tile === t.id}
                   className={`card-shadow rounded-2xl border-2 bg-white p-3.5 text-left transition-all ${tile === t.id ? "border-resq-red shadow-lg" : "border-slate-100"}`}>
@@ -344,7 +349,7 @@ function Triaging({ text }: { text: string }) {
           <div><p className="text-sm font-semibold text-white">ResQ AI · on-device</p><p className="text-xs text-white/75">Understanding your emergency…</p></div>
         </div>
       </div>
-      <main className="flex-1 space-y-4 px-4 py-5">
+      <main className="mx-auto w-full max-w-3xl flex-1 space-y-4 px-4 py-5">
         {text && <div className="flex justify-end"><div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-resq-navy px-4 py-3 text-sm text-white">{text}</div></div>}
         <div className="flex items-start gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-ai-gradient"><Icon.Activity size={14} className="text-white" /></div>
@@ -409,10 +414,10 @@ function RequestScreen({ id, config, onClose, onRetry }: { id: string; config: C
   return (
     <>
       <div className={header.bg}>
-        <NavBar title="Your request" onBack={onClose} light action={
+        <Container><NavBar title="Your request" onBack={onClose} light action={
           <span className="flex items-center gap-1.5 rounded-xl bg-white/15 px-2.5 py-1.5 text-xs font-semibold text-white">
             <PulsingDot color={connected ? "green" : "red"} />{connected ? "LIVE" : "…"}
-          </span>} />
+          </span>} /></Container>
         <div className="px-5 pb-6 text-center">
           {r.status === "matched" && <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-3xl bg-white/20"><Icon.Check size={34} className="text-white" /></div>}
           <h2 className="font-display text-2xl font-bold text-white">{header.title}</h2>
@@ -420,7 +425,8 @@ function RequestScreen({ id, config, onClose, onRetry }: { id: string; config: C
         </div>
       </div>
 
-      <main className="relative z-10 -mt-3 flex flex-1 flex-col gap-4 px-4 pb-6">
+      <main className="relative z-10 mx-auto -mt-3 grid w-full max-w-6xl flex-1 content-start gap-4 px-4 pb-6 md:px-8 lg:grid-cols-2 lg:items-start">
+        <div className="flex flex-col gap-4">
         {r.status === "escalated" && (
           <div className="card-shadow-lg rounded-2xl border-2 border-resq-red bg-white p-5 text-center">
             <p className="font-display text-lg font-bold text-resq-red">No helper could be reached.</p>
@@ -433,8 +439,9 @@ function RequestScreen({ id, config, onClose, onRetry }: { id: string; config: C
         {r.status === "searching" && <DispatchCard view={view} left={left} windowS={windowS} />}
         {(r.status === "matched" || r.status === "resolved") && view.matchedHelper && <MatchedCard view={view} />}
         {r.status === "resolved" && <RateCard onRate={(stars) => patch({ action: "rate", stars })} />}
-
         {t && <TriageCard view={view} />}
+        </div>
+        <div className="flex flex-col gap-4">
         {view.guidance && <GuidanceCard view={view} />}
         <Timeline view={view} />
 
@@ -445,6 +452,7 @@ function RequestScreen({ id, config, onClose, onRetry }: { id: string; config: C
         {(r.status === "resolved" || r.status === "cancelled") && (
           <button onClick={onClose} className="min-h-12 w-full rounded-2xl bg-resq-navy font-semibold text-white">Back to home</button>
         )}
+        </div>
       </main>
       <Call112Bar />
     </>
