@@ -1,0 +1,23 @@
+import { getHelperSession, getRequesterId } from "@/lib/auth";
+import { isLatLng, json, jsonError, readJson, safe, text } from "@/lib/validate";
+import { createHelpRequest } from "@/lib/waves";
+import { buildRequestView } from "@/lib/views";
+
+export const dynamic = "force-dynamic";
+
+export const POST = safe(async (req: Request) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) return jsonError(401, "unauthenticated");
+  const body = await readJson(req);
+  if (!body.ok) return jsonError(400, "bad_json");
+  const description = text(body.value.description, 1000);
+  if (!description) return jsonError(400, "description_invalid");
+  const loc = body.value.location;
+  if (loc !== undefined && loc !== null && !isLatLng(loc)) return jsonError(400, "location_invalid");
+  const location = isLatLng(loc) ? loc : null;
+  const r = await createHelpRequest({
+    requesterId, requesterPhone: null, requesterHelperId: getHelperSession(req)?.helperId ?? null, description,
+    location, locationSource: location ? "gps" : "none", landmark: null, channel: "app",
+  });
+  return json(await buildRequestView(r.id), 201);
+});
