@@ -5,6 +5,7 @@
  */
 import type { AuditEntry, Authority, Dispatch, Helper, HelpRequest, LatLng, Otp, Rating, StoreErrorReason, UserLocation, Zone } from "../types";
 import { MemoryStore } from "./memory";
+import { JsonFilePersistence, MongoPersistence } from "./persist";
 
 export type AcceptResult =
   | { ok: true; request: HelpRequest; dispatch: Dispatch; cancelled: Dispatch[] }
@@ -50,8 +51,11 @@ function createStore(): Store {
   const kind = process.env.STORE || "memory";
   if (kind !== "memory") throw new Error(`store adapter "${kind}" not purchased`);
   const f = process.env.RESQ_DATA_FILE?.trim();
-  const persistPath = f === "off" ? null : f || `${process.cwd()}/.data/accounts.json`;
-  return new MemoryStore({ persistPath });
+  const jsonPath = f === "off" ? null : f || `${process.cwd()}/.data/accounts.json`;
+  const mongo = process.env.MONGODB_URI?.trim();
+  // MongoDB holds registered users when configured (first start imports the JSON file); otherwise the JSON file.
+  const persistence = mongo ? new MongoPersistence(mongo, process.env.MONGODB_DB?.trim() || "resq", jsonPath) : jsonPath ? new JsonFilePersistence(jsonPath) : null;
+  return new MemoryStore({ persistence });
 }
 
 export function getStore(): Store {

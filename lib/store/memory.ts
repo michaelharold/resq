@@ -3,8 +3,7 @@
  * No database was purchased, so user accounts (helpers: name, phone, skills, reliability) are saved to a local
  * JSON file when `persistPath` is set, and reloaded at boot. Requests and dispatches stay in memory.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { JsonFilePersistence, type Changes, type Persistence } from "./persist";
 import type { AuditEntry, Authority, Dispatch, Helper, HelpRequest, LatLng, Otp, Rating, UserLocation, Zone } from "../types";
 import type { AcceptResult, Store } from "./index";
 import { seedHelpers, seedResidents } from "../../scripts/seed";
@@ -13,7 +12,7 @@ import { getSeedCenter } from "../dispatch";
 const c = structuredClone;
 const OPEN = new Set(["triaging", "searching", "matched", "escalated"]);
 
-export type MemoryStoreOptions = { seed?: boolean; center?: LatLng; now?: Date; persistPath?: string | null };
+export type MemoryStoreOptions = { seed?: boolean; center?: LatLng; now?: Date; persistPath?: string | null; persistence?: Persistence | null };
 const SEEDED = /^seed-helper-/;
 
 export class MemoryStore implements Store {
@@ -26,92 +25,100 @@ export class MemoryStore implements Store {
   private zones = new Map<string, Zone>();
   private authorities = new Map<string, Authority>();
   private auditLog: AuditEntry[] = [];
-  private persistPath: string | null;
+  private persistence: Persistence | null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private dirty = { helpers: new Set<string>(), locations: new Set<string>(), deletedLocations: new Set<string>(), zones: new Set<string>(), authorities: new Set<string>(), audit: [] as AuditEntry[] };
+  /** Resolves once saved data has been loaded; every public method awaits it (before any check, so accept stays atomic). */
+  private ready: Promise<void>;
 
   constructor(opts: MemoryStoreOptions = {}) {
-    this.persistPath = opts.persistPath ?? null;
+    this.persistence = opts.persistence ?? (opts.persistPath ? new JsonFilePersistence(opts.persistPath) : null);
     if (opts.seed ?? process.env.SEED_ON_BOOT !== "0") {
       for (const h of seedHelpers(opts.center ?? getSeedCenter(), opts.now ?? new Date())) this.helpers.set(h.id, h);
       for (const r of seedResidents(opts.center ?? getSeedCenter(), opts.now ?? new Date())) this.locations.set(r.phone, r);
     }
-    this.load();
+    this.ready = this.load();
   }
 
-  private load() {
-    if (!this.persistPath) return;
+  private async load() {
+    if (!this.persistence) return;
     try {
-      const saved = JSON.parse(readFileSync(this.persistPath, "utf8")) as { helpers?: Helper[]; locations?: UserLocation[]; zones?: Zone[]; authorities?: Authority[]; audit?: AuditEntry[] };
+      const saved = await this.persistence.load();
+      if (!saved) return;
       for (const l of saved.locations ?? []) if (l?.phone && l.source !== "seed") this.locations.set(l.phone, l);
       for (const z of saved.zones ?? []) if (z?.id) this.zones.set(z.id, z);
       for (const a of saved.authorities ?? []) if (a?.username) this.authorities.set(a.username, a);
       this.auditLog = (saved.audit ?? []).slice(0, 500);
       // Accounts come back off duty: nobody should be pinged until they reopen the app and go on duty again.
       for (const h of saved.helpers ?? []) if (h && typeof h.id === "string" && !SEEDED.test(h.id)) this.helpers.set(h.id, { ...h, onDuty: false });
-      console.log(`[store] loaded ${saved.helpers?.length ?? 0} accounts from ${this.persistPath}`);
+      console.log(`[store] loaded ${saved.helpers?.length ?? 0} users from ${this.persistence.name}`);
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") console.error("[store] could not load accounts", e);
+      console.error(`[store] could not load from ${this.persistence.name}; continuing in memory`, e);
     }
   }
   private save() {
-    if (!this.persistPath || this.saveTimer) return;
+    if (!this.persistence || this.saveTimer) return;
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
-      try {
-        const helpers = [...this.helpers.values()].filter((h) => !SEEDED.test(h.id));
-        mkdirSync(dirname(this.persistPath!), { recursive: true });
-        const locations = [...this.locations.values()].filter((l) => l.source !== "seed");
-        writeFileSync(this.persistPath + ".tmp", JSON.stringify({
-          savedAt: new Date().toISOString(), helpers, locations, zones: [...this.zones.values()],
-          authorities: [...this.authorities.values()], audit: this.auditLog.slice(0, 500),
-        }, null, 2));
-        renameSync(this.persistPath + ".tmp", this.persistPath!); // atomic replace
-      } catch (e) { console.error("[store] save failed", e); }
+      const d = this.dirty;
+      this.dirty = { helpers: new Set(), locations: new Set(), deletedLocations: new Set(), zones: new Set(), authorities: new Set(), audit: [] };
+      const pick = <T,>(m: Map<string, T>, ids: Set<string>) => [...ids].map((id) => m.get(id)).filter((x): x is T => !!x).map((x) => c(x));
+      const changes: Changes = {
+        helpers: pick(this.helpers, d.helpers).filter((h) => !SEEDED.test(h.id)),
+        locations: pick(this.locations, d.locations).filter((l) => l.source !== "seed"),
+        deletedLocations: [...d.deletedLocations], zones: pick(this.zones, d.zones), authorities: pick(this.authorities, d.authorities), audit: d.audit,
+        full: {
+          helpers: [...this.helpers.values()].filter((h) => !SEEDED.test(h.id)), locations: [...this.locations.values()].filter((l) => l.source !== "seed"),
+          zones: [...this.zones.values()], authorities: [...this.authorities.values()], audit: this.auditLog.slice(0, 500),
+        },
+      };
+      this.persistence!.flush(changes).catch((e) => console.error(`[store] save to ${this.persistence!.name} failed`, e));
     }, 300);
   }
+  private touch(kind: "helpers" | "locations" | "zones" | "authorities", id: string) { this.dirty[kind].add(id); if (kind === "locations") this.dirty.deletedLocations.delete(id); this.save(); }
 
-  async upsertHelper(h: Helper) { this.helpers.set(h.id, c(h)); this.save(); return c(h); }
-  async getHelper(id: string) { const h = this.helpers.get(id); return h ? c(h) : null; }
-  async getHelperByPhone(phone: string) {
+  async upsertHelper(h: Helper) { await this.ready; this.helpers.set(h.id, c(h)); this.touch("helpers", h.id); return c(h); }
+  async getHelper(id: string) { await this.ready; const h = this.helpers.get(id); return h ? c(h) : null; }
+  async getHelperByPhone(phone: string) { await this.ready;
     for (const h of this.helpers.values()) if (h.phone === phone) return c(h);
     return null;
   }
-  async listHelpers() { return [...this.helpers.values()].map((h) => c(h)); }
-  async getOnDutyHelpers() { return [...this.helpers.values()].filter((h) => h.onDuty && h.location).map((h) => c(h)); }
-  async setOnDuty(id: string, onDuty: boolean, location?: LatLng | null) {
+  async listHelpers() { await this.ready; return [...this.helpers.values()].map((h) => c(h)); }
+  async getOnDutyHelpers() { await this.ready; return [...this.helpers.values()].filter((h) => h.onDuty && h.location).map((h) => c(h)); }
+  async setOnDuty(id: string, onDuty: boolean, location?: LatLng | null) { await this.ready;
     const h = this.helpers.get(id);
     if (!h) return null;
     h.onDuty = onDuty;
     if (location !== undefined) h.location = location;
     h.lastSeen = new Date().toISOString();
-    this.save();
+    this.touch("helpers", id);
     return c(h);
   }
 
-  async createRequest(r: HelpRequest) { this.requests.set(r.id, c(r)); return c(r); }
-  async getRequest(id: string) { const r = this.requests.get(id); return r ? c(r) : null; }
-  async updateRequest(id: string, patch: Partial<HelpRequest>) {
+  async createRequest(r: HelpRequest) { await this.ready; this.requests.set(r.id, c(r)); return c(r); }
+  async getRequest(id: string) { await this.ready; const r = this.requests.get(id); return r ? c(r) : null; }
+  async updateRequest(id: string, patch: Partial<HelpRequest>) { await this.ready;
     const r = this.requests.get(id);
     if (!r) return null;
     Object.assign(r, c(patch), { id, updatedAt: new Date().toISOString() });
     return c(r);
   }
-  async listOpenRequests() {
+  async listOpenRequests() { await this.ready;
     return [...this.requests.values()]
       .filter((r) => OPEN.has(r.status))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((r) => c(r));
   }
 
-  async createDispatches(ds: Dispatch[]) { for (const d of ds) this.dispatches.set(d.id, c(d)); return c(ds); }
-  async getDispatch(id: string) { const d = this.dispatches.get(id); return d ? c(d) : null; }
-  async listDispatches(requestId: string) {
+  async createDispatches(ds: Dispatch[]) { await this.ready; for (const d of ds) this.dispatches.set(d.id, c(d)); return c(ds); }
+  async getDispatch(id: string) { await this.ready; const d = this.dispatches.get(id); return d ? c(d) : null; }
+  async listDispatches(requestId: string) { await this.ready;
     return [...this.dispatches.values()].filter((d) => d.requestId === requestId).map((d) => c(d));
   }
-  async listPingedForHelper(helperId: string) {
+  async listPingedForHelper(helperId: string) { await this.ready;
     return [...this.dispatches.values()].filter((d) => d.helperId === helperId && d.status === "pinged").map((d) => c(d));
   }
-  async updateDispatch(id: string, patch: Partial<Dispatch>) {
+  async updateDispatch(id: string, patch: Partial<Dispatch>) { await this.ready;
     const d = this.dispatches.get(id);
     if (!d) return null;
     Object.assign(d, c(patch), { id });
@@ -119,7 +126,7 @@ export class MemoryStore implements Store {
   }
 
   /** Atomic: no await between the checks and the writes. */
-  async acceptDispatch(dispatchId: string): Promise<AcceptResult> {
+  async acceptDispatch(dispatchId: string): Promise<AcceptResult> { await this.ready;
     const d = this.dispatches.get(dispatchId);
     if (!d) return { ok: false, reason: "not_found" };
     if (d.status === "cancelled") return { ok: false, reason: "already_matched" };
@@ -139,9 +146,9 @@ export class MemoryStore implements Store {
     return { ok: true, request: c(r), dispatch: c(d), cancelled };
   }
 
-  async saveRating(r: Rating) { this.ratings.set(r.requestId, c(r)); return c(r); }
-  async saveOtp(o: Otp) { this.otps.set(o.phone, { ...c(o), attempts: 0 }); }
-  async verifyOtp(phone: string, code: string) {
+  async saveRating(r: Rating) { await this.ready; this.ratings.set(r.requestId, c(r)); return c(r); }
+  async saveOtp(o: Otp) { await this.ready; this.otps.set(o.phone, { ...c(o), attempts: 0 }); }
+  async verifyOtp(phone: string, code: string) { await this.ready;
     const o = this.otps.get(phone);
     if (!o) return false;
     if (Date.parse(o.expiresAt) <= Date.now()) { this.otps.delete(phone); return false; }
@@ -155,7 +162,7 @@ export class MemoryStore implements Store {
   }
 
   // ── Disaster response ──────────────────────────────────────────────────────────────────────────────────────
-  async recordLocation(u: Omit<UserLocation, "history">) {
+  async recordLocation(u: Omit<UserLocation, "history">) { await this.ready;
     const prev = this.locations.get(u.phone);
     const history = prev ? prev.history : [];
     const last = history[history.length - 1];
@@ -166,16 +173,16 @@ export class MemoryStore implements Store {
     while (history.length && Date.parse(history[0].at) < cutoff) history.shift();
     const next: UserLocation = { ...c(u), name: u.name ?? prev?.name ?? null, helperId: u.helperId ?? prev?.helperId ?? null, history };
     this.locations.set(u.phone, next);
-    this.save();
+    this.touch("locations", u.phone);
     return c(next);
   }
-  async listLocations() { return [...this.locations.values()].map((l) => c(l)); }
-  async deleteLocation(phone: string) { this.locations.delete(phone); this.save(); }
-  async saveZone(z: Zone) { this.zones.set(z.id, c(z)); this.save(); return c(z); }
-  async listZones() { return [...this.zones.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((z) => c(z)); }
-  async getAuthority(username: string) { const a = this.authorities.get(username); return a ? c(a) : null; }
-  async listAuthorities() { return [...this.authorities.values()].map((a) => c(a)); }
-  async upsertAuthority(a: Authority) { this.authorities.set(a.username, c(a)); this.save(); return c(a); }
-  async audit(e: AuditEntry) { this.auditLog.unshift(c(e)); if (this.auditLog.length > 500) this.auditLog.length = 500; this.save(); }
-  async listAudit() { return this.auditLog.map((e) => c(e)); }
+  async listLocations() { await this.ready; return [...this.locations.values()].map((l) => c(l)); }
+  async deleteLocation(phone: string) { await this.ready; this.locations.delete(phone); this.dirty.locations.delete(phone); this.dirty.deletedLocations.add(phone); this.save(); }
+  async saveZone(z: Zone) { await this.ready; this.zones.set(z.id, c(z)); this.touch("zones", z.id); return c(z); }
+  async listZones() { await this.ready; return [...this.zones.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((z) => c(z)); }
+  async getAuthority(username: string) { await this.ready; const a = this.authorities.get(username); return a ? c(a) : null; }
+  async listAuthorities() { await this.ready; return [...this.authorities.values()].map((a) => c(a)); }
+  async upsertAuthority(a: Authority) { await this.ready; this.authorities.set(a.username, c(a)); this.touch("authorities", a.username); return c(a); }
+  async audit(e: AuditEntry) { await this.ready; this.auditLog.unshift(c(e)); if (this.auditLog.length > 500) this.auditLog.length = 500; this.dirty.audit.push(c(e)); this.save(); }
+  async listAudit() { await this.ready; return this.auditLog.map((e) => c(e)); }
 }
