@@ -5,7 +5,7 @@ import { emit } from "@/lib/events";
 import { INITIAL_RELIABILITY } from "@/lib/dispatch";
 import { HELPER_SESSION_MAX_AGE_SEC, SESSION_COOKIE, isSecureRequest, serializeCookie, sign } from "@/lib/session";
 import { normalizePhone } from "@/lib/sms";
-import { isLatLng, json, jsonError, readJson, safe, skillsOf, text } from "@/lib/validate";
+import { equipmentOf, isLatLng, json, jsonError, profileOf, readJson, safe, skillsOrEmpty, text } from "@/lib/validate";
 import { onReject } from "@/lib/waves";
 import type { Helper } from "@/lib/types";
 
@@ -22,8 +22,12 @@ export const POST = safe(async (req: Request) => {
   if (!name) return jsonError(400, "name_invalid");
   const phone = normalizePhone(b.phone);
   if (!phone) return jsonError(400, "phone_invalid");
-  const skills = skillsOf(b.skills);
+  const skills = skillsOrEmpty(b.skills);
   if (!skills) return jsonError(400, "skills_invalid");
+  const equipment = equipmentOf(b.equipment);
+  if (!equipment) return jsonError(400, "equipment_invalid");
+  const prof = b.profile === undefined ? null : profileOf(b.profile, normalizePhone);
+  if (prof && !prof.ok) return jsonError(400, `${prof.field}_invalid`);
   if (b.location !== undefined && b.location !== null && !isLatLng(b.location)) return jsonError(400, "location_invalid");
   if (b.onDuty !== undefined && typeof b.onDuty !== "boolean") return jsonError(400, "onDuty_invalid");
   if (b.reliability !== undefined && !(typeof b.reliability === "number" && b.reliability >= 0 && b.reliability <= 1)) return jsonError(400, "reliability_invalid");
@@ -47,6 +51,8 @@ export const POST = safe(async (req: Request) => {
     onDuty: typeof b.onDuty === "boolean" ? b.onDuty : existing?.onDuty ?? false,
     reliability: typeof b.reliability === "number" ? b.reliability : existing?.reliability ?? INITIAL_RELIABILITY,
     lastSeen: typeof b.lastSeen === "string" ? b.lastSeen : existing?.lastSeen ?? now,
+    equipment: b.equipment === undefined ? existing?.equipment ?? [] : equipment,
+    ...(prof?.ok ? { profile: prof.value } : existing?.profile ? { profile: existing.profile } : {}),
   });
   emit("helper:updated", { helper });
   const headers: HeadersInit = {};

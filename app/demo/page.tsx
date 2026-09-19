@@ -17,12 +17,12 @@ export default function DemoPage() {
   const [slot, setSlot] = useState(0);
   const next = () => { const s = slot; setSlot((x) => (x + 1) % 4); return s; };
   const steps = [
-    { n: 1, t: "Coordinator: switch seeded helpers off", d: "In /ops (coordinator / resq-ops), press “Seeded helpers off” so only your helper windows can receive pings. Keep it open to watch everything live." },
-    { n: 2, t: "Open 2–3 helper windows", d: "In each: enter any 10-digit number (e.g. 98765 00001, …02), type the on-screen demo code, add skills (Swimmer + Boat owner for a flood demo) and switch On duty." },
-    { n: 3, t: "Open a requester window", d: "Tap REQUEST HELP, say or type e.g. “Water is rising, my grandmother can't walk”, add a name/phone and send." },
-    { n: 4, t: "Watch the dispatch", d: "Every helper window beeps and shows the request with a 30 s countdown. One Declines, another Accepts: the rest are stood down instantly." },
-    { n: 5, t: "Live tracking", d: "The accepted helper travels toward the requester (simulated on a laptop, real GPS on phones). Both maps update every 3 s until “Arrived”." },
-    { n: 6, t: "Finish", d: "Helper taps “Mark as done”; the requester rates them. Try “no one answers” too: 4 waves widen 1→2→4→8 km, then it escalates on /ops." },
+    { n: 1, t: "Open 3–4 user windows", d: "Each window signs in with a different 10-digit number (e.g. 98765 00001, …02) and types the on-screen demo code." },
+    { n: 2, t: "Create profiles", d: "Fill basic details (name, age, blood group, medical notes, emergency contact), then pick skills and equipment. Make one a Nurse with a first-aid kit, another a Swimmer with a boat." },
+    { n: 3, t: "Ask for help from one window", d: "Tap ASK FOR HELP, say or type e.g. “My father collapsed and is not breathing”. Name, phone, blood group and location come from the profile automatically." },
+    { n: 4, t: "Matching neighbours see it instantly", d: "Windows whose skills or equipment match beep and show the request under “People near you who need help”. Tap it to see the requester's full details." },
+    { n: 5, t: "Accept or not", d: "“I'll help” shares your details with the requester and starts live tracking; “Not now” hides it. A second person trying to accept is told someone already did." },
+    { n: 6, t: "Authorities", d: "In /ops (coordinator / resq-ops) watch dispatch live, declare a disaster zone and see everyone's latitude/longitude inside it." },
   ];
   return (
     <div className="min-h-dvh bg-navy-gradient px-5 py-10">
@@ -35,8 +35,7 @@ export default function DemoPage() {
         <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             { label: "Coordinator", sub: "Login: coordinator / resq-ops", icon: <Icon.Activity size={22} />, cls: "bg-resq-cyan", path: "/ops", wide: true },
-            { label: "Helper window", sub: "Open 2–3 of these", icon: <Icon.Shield size={22} />, cls: "bg-resq-green", path: "/helper" },
-            { label: "Requester window", sub: "The person in trouble", icon: <Icon.AlertTriangle size={22} />, cls: "bg-resq-red", path: "/" },
+            { label: "User window", sub: "Open 3–4 of these", icon: <Icon.User size={22} />, cls: "bg-resq-green", path: "/" },
           ].map((b) => (
             <button key={b.label} onClick={() => (b.wide ? window.open("/ops", "_blank", "noopener") : open(b.path, next()))}
               className="rounded-2xl border border-white/15 bg-white/5 p-5 text-left transition-colors hover:bg-white/10">
@@ -45,11 +44,11 @@ export default function DemoPage() {
               <p className="text-sm text-white/60">{b.sub}</p>
             </button>
           ))}
-          <button onClick={() => { open("/helper", 0); open("/helper", 1); open("/helper", 2); open("/", 3); }}
+          <button onClick={() => { open("/", 0); open("/", 1); open("/", 2); open("/", 3); }}
             className="rounded-2xl border-2 border-resq-red bg-resq-red/20 p-5 text-left transition-colors hover:bg-resq-red/30">
             <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-resq-red text-white"><Icon.Expand size={22} /></div>
-            <p className="font-display text-lg font-bold text-white">Open all 4</p>
-            <p className="text-sm text-white/60">3 helpers + 1 requester, side by side</p>
+            <p className="font-display text-lg font-bold text-white">Open 4 users</p>
+            <p className="text-sm text-white/60">4 users side by side</p>
           </button>
         </div>
         <p className="mt-3 text-xs text-white/50">If nothing opens, allow pop-ups for this site. On phones, just open the helper and requester pages on different devices.</p>

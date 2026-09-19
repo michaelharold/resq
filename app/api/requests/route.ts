@@ -1,13 +1,17 @@
 import { getHelperSession, getRequesterId } from "@/lib/auth";
 import { isLatLng, json, jsonError, readJson, safe, text } from "@/lib/validate";
 import { normalizePhone } from "@/lib/sms";
+import { getStore } from "@/lib/store";
 import { createHelpRequest } from "@/lib/waves";
 import { buildRequestView } from "@/lib/views";
 
 export const dynamic = "force-dynamic";
 
 export const POST = safe(async (req: Request) => {
-  const requesterId = getRequesterId(req);
+  // Signed-in users (the normal path): name, phone and profile come from their account.
+  const session = getHelperSession(req);
+  const account = session?.helperId ? await getStore().getHelper(session.helperId) : null;
+  const requesterId = account ? `acct:${account.id}` : getRequesterId(req);
   if (!requesterId) return jsonError(401, "unauthenticated");
   const body = await readJson(req);
   if (!body.ok) return jsonError(400, "bad_json");
@@ -24,7 +28,8 @@ export const POST = safe(async (req: Request) => {
   const requesterPhone = b.phone === undefined || b.phone === "" ? null : normalizePhone(b.phone);
   if (requesterPhone === null && b.phone !== undefined && b.phone !== "") return jsonError(400, "phone_invalid");
   const r = await createHelpRequest({
-    requesterId, requesterPhone, requesterName, requesterHelperId: getHelperSession(req)?.helperId ?? null, description,
+    requesterId, requesterPhone: requesterPhone ?? account?.phone ?? null, requesterName: requesterName ?? account?.name ?? null,
+    requesterProfile: account?.profile ?? null, requesterHelperId: account?.id ?? null, description,
     location, locationSource: location ? "gps" : "none", landmark: null, channel: "app", role,
   });
   return json(await buildRequestView(r.id), 201);

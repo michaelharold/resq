@@ -227,11 +227,9 @@ npm test                                          # 35 unit tests (dispatch, wav
 
 | Screen | URL | Notes |
 |---|---|---|
-| Requester | `/` | No login for **Request help**, **Call 112** and **SMS**. Every other option (I can help, share location, helper pages) opens a phone + code sign-in sheet first. Accounts are saved locally to `.data/accounts.json` (no database), so they survive restarts. |
-| Requester (details) | `/` | No login. Pick a type and/or describe it (text or hold-to-speak). "It's me / Someone else" switches the curated guidance between victim and witness steps. |
-| Helper | `/helper` | Phone + OTP. Without Twilio credentials the code is shown on screen (simulated SMS). Go **On duty** to receive pings. |
-| Demo launcher | `/demo` | Opens phone-sized windows side by side. **Every window is a separate person** (identity is per window), so one laptop can run a requester and several helpers. |
-| Coordinator | `/ops` | Authority accounts: username + password (default `coordinator` / `resq-ops`, from `OPS_USER` / `OPS_PASSWORD`); admins add officer accounts under **Team & audit**. **Disaster zones**: click the map to place a zone (landslide, flood…), set its radius, and see everyone who is in it now or was in it in the 6 h before, with name, phone, latitude/longitude, accuracy and last update; export CSV or SMS them all. Every view of locations is audit-logged. Signed-in users share their location every 30 s (visible, pausable, deletable). Live map, escalations, coverage by skill, SMS log, and a **Simulate inbound SMS** box for `YES` / `NO` / `HELP …` without Twilio. |
+| App (everyone) | `/` | **Sign in** with phone + code → **profile**: name, age, blood group, address, medical notes, emergency contact, **skills** and **equipment** → **dashboard**. The dashboard has **Ask for help** (one question: what's happening; name, phone, medical details and location come from the profile) and, below it, **people nearby who need your skills or equipment**. Tap a card to see the requester's full details, then **I'll help** (both sides get each other's details, live tracking starts) or **Not now**. Accounts are stored locally in `.data/accounts.json`. |
+| Demo launcher | `/demo` | Opens phone-sized windows side by side; every window is a separate signed-in person. |
+| Authorities | `/ops` | Username + password (default `coordinator` / `resq-ops`). Live dispatch, **Disaster zones** (everyone's lat/lng inside a declared area, CSV, SMS alert) and **Team & audit**. |
 
 Multi-window demo: in `/ops` press **Seeded helpers off**, open 2–3 helper windows and one requester window from `/demo`, and every on-duty helper window beeps with the request. Once a helper accepts, their position streams every 3 s (simulated travel on a laptop, real GPS on phones) and the requester's map and distance update live.
 

@@ -126,7 +126,7 @@ export class MemoryStore implements Store {
     if (d.status !== "pinged") return { ok: false, reason: "expired" };
     const r = this.requests.get(d.requestId);
     if (!r) return { ok: false, reason: "not_found" };
-    if (r.status !== "searching") return { ok: false, reason: "already_matched" };
+    if (r.status !== "searching" && r.status !== "escalated") return { ok: false, reason: "already_matched" };
     const now = new Date().toISOString();
     d.status = "accepted"; d.respondedAt = now;
     r.status = "matched"; r.matchedHelperId = d.helperId; r.waveStartedAt = null; r.updatedAt = now;

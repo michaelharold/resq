@@ -7,6 +7,7 @@ export function requestAccess(req: Request, r: HelpRequest, uidOverride?: string
   const uid = uidOverride ?? getRequesterId(req);
   if (uid && uid === r.requesterId) return "requester";
   const s = getHelperSession(req);
+  if (s?.helperId && s.helperId === r.requesterHelperId) return "requester"; // signed-in requester
   if (s?.helperId && s.helperId === r.matchedHelperId) return "helper";
   return null;
 }

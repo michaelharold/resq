@@ -19,6 +19,8 @@ export const POST = safe(async (req: Request) => {
     phone: s.phone, name: helper?.name ?? null, helperId: helper?.id ?? null, location,
     accuracyM: typeof accuracyM === "number" ? Math.round(accuracyM) : null, source: source === "demo" ? "demo" : "gps", updatedAt: new Date().toISOString(),
   });
+  // Keep the account's own position current too, so nearby requests and dispatch use where the person is now.
+  if (helper) await store.upsertHelper({ ...helper, location, lastSeen: saved.updatedAt });
   return json({ ok: true, updatedAt: saved.updatedAt });
 });
 

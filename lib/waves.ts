@@ -7,11 +7,11 @@
 import { randomUUID } from "node:crypto";
 import { emit } from "./events";
 import { getStore } from "./store";
-import { MAX_WAVES, TICK_GRACE_MS, WAVE_RADII_KM, selectWave, waveWindowMs } from "./dispatch";
+import { MAX_WAVES, TICK_GRACE_MS, WAVE_RADII_KM, haversineKm, selectWave, waveWindowMs } from "./dispatch";
 import { mapsUrl, sendSms, tplPing, tplRequesterEscalated, tplRequesterMatched } from "./sms";
 import { triage } from "./triage";
 import { inferRole } from "./role";
-import type { Channel, Dispatch, Helper, HelpRequest, LatLng, LocationSource, RequesterRole, StoreErrorReason } from "./types";
+import type { Channel, Dispatch, Helper, HelpRequest, LatLng, LocationSource, RequesterRole, StoreErrorReason, UserProfile } from "./types";
 
 const g = globalThis as unknown as { __resq_locks?: Map<string, Promise<unknown>> };
 const locks = (g.__resq_locks ??= new Map());
@@ -88,13 +88,14 @@ export type NewRequestInput = {
   requesterId: string; requesterPhone: string | null; requesterHelperId: string | null; description: string;
   location: LatLng | null; locationSource: LocationSource; landmark: string | null; channel: Channel; role?: RequesterRole;
   requesterName?: string | null;
+  requesterProfile?: UserProfile | null;
 };
 
 export async function createHelpRequest(input: NewRequestInput): Promise<HelpRequest> {
   const store = getStore();
   const now = nowIso();
   const created = await store.createRequest({
-    id: randomUUID(), ...input, requesterName: input.requesterName ?? null, role: input.role ?? inferRole(input.description), triage: null, status: "triaging", wave: 0, radiusKm: 0, waveStartedAt: null,
+    id: randomUUID(), ...input, requesterName: input.requesterName ?? null, requesterProfile: input.requesterProfile ?? null, role: input.role ?? inferRole(input.description), triage: null, status: "triaging", wave: 0, radiusKm: 0, waveStartedAt: null,
     matchedHelperId: null, createdAt: now, updatedAt: now,
   });
   emit("request:updated", { request: created });
@@ -157,22 +158,61 @@ export type AcceptOk = { ok: true; request: HelpRequest; dispatch: Dispatch; loc
 export async function accept(dispatchId: string, via: Channel = "app"): Promise<AcceptOk | { ok: false; reason: StoreErrorReason }> {
   const d0 = await getStore().getDispatch(dispatchId);
   if (!d0) return { ok: false, reason: "not_found" };
-  return withRequestLock(d0.requestId, async () => {
+  return withRequestLock(d0.requestId, () => acceptLocked(dispatchId, via));
+}
+
+async function acceptLocked(dispatchId: string, via: Channel): Promise<AcceptOk | { ok: false; reason: StoreErrorReason }> {
+  const store = getStore();
+  const res = await store.acceptDispatch(dispatchId);
+  if (!res.ok) return res;
+  const dispatch = via === "sms" ? ((await store.updateDispatch(dispatchId, { channel: "sms" })) as Dispatch) : res.dispatch;
+  const request = res.request;
+  emit("dispatch:updated", { dispatch, request });
+  for (const c of res.cancelled) emit("dispatch:updated", { dispatch: c, request });
+  emit("request:updated", { request });
+  if (request.channel === "sms" && request.requesterPhone) {
+    const h = await store.getHelper(dispatch.helperId);
+    const skill = h && request.triage ? request.triage.skills.find((s) => h.skills.includes(s)) ?? h.skills[0] ?? request.triage.skills[0] : null;
+    if (h && skill) void sendSms(request.requesterPhone, tplRequesterMatched({ name: h.name, skill, distanceKm: dispatch.distanceKm, phone: h.phone }));
+  }
+  return { ok: true as const, request, dispatch, location: request.location, mapsUrl: request.location ? mapsUrl(request.location) : null, requesterPhone: request.requesterPhone };
+}
+
+/**
+ * A neighbour who saw the request in their feed takes it, even if dispatch did not ping them (or it escalated).
+ * Reuses their pinged dispatch if they have one; otherwise creates one and accepts it atomically.
+ */
+export async function claim(requestId: string, helperId: string): Promise<AcceptOk | { ok: false; reason: StoreErrorReason | "own_request" }> {
+  return withRequestLock(requestId, async () => {
     const store = getStore();
-    const res = await store.acceptDispatch(dispatchId);
-    if (!res.ok) return res;
-    const dispatch = via === "sms" ? ((await store.updateDispatch(dispatchId, { channel: "sms" })) as Dispatch) : res.dispatch;
-    const request = res.request;
-    emit("dispatch:updated", { dispatch, request });
-    for (const c of res.cancelled) emit("dispatch:updated", { dispatch: c, request });
-    emit("request:updated", { request });
-    if (request.channel === "sms" && request.requesterPhone) {
-      const h = await store.getHelper(dispatch.helperId);
-      const skill = h && request.triage ? request.triage.skills.find((s) => h.skills.includes(s)) ?? h.skills[0] : null;
-      if (h && skill) void sendSms(request.requesterPhone, tplRequesterMatched({ name: h.name, skill, distanceKm: dispatch.distanceKm, phone: h.phone }));
+    const r = await store.getRequest(requestId);
+    if (!r) return { ok: false as const, reason: "not_found" as const };
+    if (r.requesterHelperId === helperId) return { ok: false as const, reason: "own_request" as const };
+    if (r.status !== "searching" && r.status !== "escalated") return { ok: false as const, reason: "already_matched" as const };
+    const mine = (await store.listDispatches(requestId)).find((d) => d.helperId === helperId && d.status === "pinged");
+    let id = mine?.id;
+    if (!id) {
+      const h = await store.getHelper(helperId);
+      const d: Dispatch = { id: randomUUID(), requestId, helperId, wave: r.wave, score: 0,
+        distanceKm: h?.location && r.location ? +haversineKm(h.location, r.location).toFixed(3) : 0,
+        channel: "app", status: "pinged", pingedAt: nowIso(), respondedAt: null };
+      await store.createDispatches([d]);
+      id = d.id;
     }
-    return { ok: true as const, request, dispatch, location: request.location, mapsUrl: request.location ? mapsUrl(request.location) : null, requesterPhone: request.requesterPhone };
+    return acceptLocked(id, "app");
   });
+}
+
+const gd = globalThis as unknown as { __resq_declines?: Map<string, Set<string>> };
+const declines = (gd.__resq_declines ??= new Map());
+export const hasDeclined = (requestId: string, helperId: string) => declines.get(requestId)?.has(helperId) ?? false;
+
+/** "Not now": hide the request from this person; if dispatch had pinged them, it counts as a reject. */
+export async function decline(requestId: string, helperId: string): Promise<void> {
+  if (!declines.has(requestId)) declines.set(requestId, new Set());
+  declines.get(requestId)!.add(helperId);
+  const pinged = (await getStore().listDispatches(requestId)).find((d) => d.helperId === helperId && d.status === "pinged");
+  if (pinged) await onReject(pinged.id);
 }
 
 type Simple = { ok: true; request: HelpRequest } | { ok: false; reason: "conflict" | "not_found" };

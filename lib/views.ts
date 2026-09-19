@@ -23,7 +23,7 @@ export async function buildRequestView(requestId: string): Promise<RequestView |
       const acc = ds.find((d) => d.status === "accepted");
       // Live distance when both positions are known (helper shares location while on duty), else the dispatch distance.
       const live = h.location && request.location ? haversineKm(h.location, request.location) : null;
-      matchedHelper = { id: h.id, name: h.name, skills: h.skills, phone: h.phone, location: h.location, reliability: h.reliability, distanceKm: live ?? acc?.distanceKm ?? null };
+      matchedHelper = { id: h.id, name: h.name, skills: h.skills, phone: h.phone, location: h.location, reliability: h.reliability, equipment: h.equipment ?? [], distanceKm: live ?? acc?.distanceKm ?? null };
     }
   }
   return {

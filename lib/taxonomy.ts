@@ -126,3 +126,35 @@ export function isNeedType(x: unknown): x is NeedType {
 export function isUrgency(x: unknown): x is Urgency {
   return typeof x === "string" && (URGENCIES as readonly string[]).includes(x);
 }
+
+// ─── Equipment (what people own that helps in an emergency) ──────────────────────────────────────────────────
+// Boats, 4×4s and generators stay in SKILLS (dispatch already matches on them); this list adds the rest.
+export const EQUIPMENT = [
+  "first_aid_kit", "oxygen_cylinder", "stretcher_wheelchair", "rope_ladder", "life_jacket",
+  "water_pump", "chainsaw_cutter", "torch_powerbank", "fire_extinguisher", "car",
+] as const;
+export type Equipment = (typeof EQUIPMENT)[number];
+export const EQUIPMENT_LABELS: Record<Equipment, string> = {
+  first_aid_kit: "First-aid kit", oxygen_cylinder: "Oxygen cylinder", stretcher_wheelchair: "Stretcher / wheelchair",
+  rope_ladder: "Rope / ladder", life_jacket: "Life jackets", water_pump: "Water pump", chainsaw_cutter: "Chainsaw / cutter",
+  torch_powerbank: "Torch / power bank", fire_extinguisher: "Fire extinguisher", car: "Car",
+};
+/** Equipment that is useful for each need type (used to show relevant requests to people who own it). */
+export const TYPE_EQUIPMENT: Record<NeedType, Equipment[]> = {
+  flood_rescue: ["life_jacket", "rope_ladder", "torch_powerbank"],
+  cardiac_no_breathing: ["first_aid_kit", "oxygen_cylinder", "car"],
+  bleeding: ["first_aid_kit", "car"],
+  fracture: ["first_aid_kit", "stretcher_wheelchair", "car"],
+  electrical: ["torch_powerbank", "first_aid_kit"],
+  fire: ["fire_extinguisher", "first_aid_kit"],
+  trapped_structural: ["chainsaw_cutter", "rope_ladder", "torch_powerbank"],
+  snakebite: ["car", "first_aid_kit"],
+  evacuation_mobility: ["stretcher_wheelchair", "life_jacket", "car"],
+  supplies_oxygen_meds: ["oxygen_cylinder", "car"],
+  missing_person: ["torch_powerbank", "car"],
+  other: ["first_aid_kit", "torch_powerbank"],
+};
+export function isEquipment(x: unknown): x is Equipment {
+  return typeof x === "string" && (EQUIPMENT as readonly string[]).includes(x);
+}
+export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] as const;

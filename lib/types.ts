@@ -10,7 +10,8 @@
  * is type-only (erased at compile time), so this file has no runtime dependencies and
  * `scripts/seed.ts` can `import type` from it under Node's type stripping.
  */
-import type { NEED_TYPES, SKILLS, URGENCIES } from "./taxonomy";
+import type { NEED_TYPES, SKILLS, URGENCIES, Equipment } from "./taxonomy";
+export type { Equipment } from "./taxonomy";
 
 export type Skill = (typeof SKILLS)[number];
 export type NeedType = (typeof NEED_TYPES)[number];
@@ -28,6 +29,14 @@ export type Helper = {
   onDuty: boolean;
   reliability: number; // 0..1, starts 0.7 (INITIAL_RELIABILITY)
   lastSeen: string;
+  equipment?: Equipment[]; // what they own that helps in an emergency
+  profile?: UserProfile;   // basic details collected at sign-up
+};
+
+/** Basic details every user gives at sign-up. Shared with the person on the other side of an accepted request. */
+export type UserProfile = {
+  age: number | null; bloodGroup: string | null; address: string | null; medicalNotes: string | null;
+  emergencyContactName: string | null; emergencyContactPhone: string | null;
 };
 
 export type TriageResult = {
@@ -59,6 +68,7 @@ export type HelpRequest = {
   landmark: string | null;
   channel: Channel;
   role: RequesterRole; // "self" = the requester is the person in trouble; "other" = a witness/bystander
+  requesterProfile?: UserProfile | null; // snapshot of the signed-in requester's profile at request time
   triage: TriageResult | null;
   status: RequestStatus;
   wave: number; // 0 before dispatch starts, 1..4 while searching
@@ -109,7 +119,7 @@ export type DispatchPublic = Pick<Dispatch, "id" | "wave" | "status" | "distance
 };
 
 /** The matched helper as shown to the requester; distanceKm = the accepted dispatch's distanceKm. */
-export type HelperPublic = Pick<Helper, "id" | "name" | "skills" | "phone" | "location" | "reliability"> & { distanceKm: number | null };
+export type HelperPublic = Pick<Helper, "id" | "name" | "skills" | "phone" | "location" | "reliability" | "equipment"> & { distanceKm: number | null };
 
 /** GET /api/requests/:id, POST .../tick, requester SSE snapshot. */
 export type RequestView = {
