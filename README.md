@@ -1,296 +1,191 @@
-# ResQ — Uber for emergencies
+# ResQ — trusted local help, one tap away
 
-> Skilled neighbours, dispatched in seconds. Built for Kraft Night (IEDC TKMCE) — Theme: **Cooperation**
-
-This file is both the project README and the build specification handed to the coding agent. Sections 6–11 are written to be executed as-is.
-
-ResQ turns a neighbourhood into a response network. Residents register the skills they already have — doctor, nurse, swimmer, boat owner, electrician, plumber, 4×4 driver, generator owner. When someone is in trouble they describe the problem (voice or text), the app triages it, shows them what to do *right now*, and dispatches the best-placed helpers Uber-style: the top three are pinged in parallel, the first to accept gets the job, and if nobody answers within 30 seconds the next wave goes out with a wider radius. When mobile data dies, the whole loop still works over SMS.
-
-It complements 112. It does not replace it.
+> A community marketplace for local services: plumbers, electricians, carpenters, AC technicians, cleaners,
+> mechanics, doctors, nurses and caregivers from your own neighbourhood. Like Uber, but for local professionals
+> and skilled neighbours, so they earn directly from their skills.
+>
+> Built for Kraft Night 2026 (IEDC TKMCE).
 
 ---
 
-## 1. The problem
+## The problem
 
-During the 2018 Kerala floods and the 2024 Wayanad landslides, official response systems were overwhelmed within hours. Most early rescues were done by neighbours — fishermen with boats, nurses next door, people who could swim — coordinated through chaotic WhatsApp groups where a plea for a boat scrolled past 200 messages.
+When a pipe bursts, a fuse trips or an elderly parent needs a nurse, finding the right person nearby is slow and
+uncertain. You ask around, call numbers from old WhatsApp forwards, and hope. You cannot see **who is available
+right now**, **what they will charge**, or **whether they can be trusted**. Meanwhile the electrician two streets
+away has free hours and no simple way to find local work on his own terms.
 
-The skills were always there. What was missing was **matching and dispatch**: who nearby can help with *this* problem, how do we reach them in seconds, and what does the person do while help is on the way?
+## What ResQ does
 
-## 2. Why this is "Cooperation"
+**If you need help**
+1. Tap a service and see how many providers are nearby and their price ranges.
+2. Describe the problem by typing or speaking. A **local AI** reads it and works out the job: a title, the tools
+   needed, how long it should take, the skill level, and **which photos to take, from which angle**, so the worker
+   arrives prepared.
+3. Matching providers within 10 km get it instantly. The first to accept gets the job.
+4. You see their name, rating, ID-verified badge, phone, price range and **live position on a map**. Call or message
+   them in a tap.
+5. When it's done, pay (in-app payment is a placeholder for now) and rate them.
 
-- **Citizens ↔ citizens:** skills become a shared resource of the neighbourhood.
-- **Citizens ↔ institutions:** a coordinator dashboard gives ward officers and NGOs a live picture of unmet needs, with escalation when the community can't cover a request.
-- **Humans ↔ AI:** the AI never acts alone — it triages, suggests, and hands off to a human helper.
+**If you offer a service**
+- Pick your services, set **your own price range** for each, list the **tools you carry**, and upload an **ID proof**
+  an admin verifies for a trust badge.
+- Job requests for your services arrive live with a sound, with the customer's details and a map.
+- **No app open? No missed work.** Matched providers who are offline get an SMS and claim the job with one reply:
+  `ACCEPT 1234`. The app reacts exactly as if they had tapped Accept.
+- One job at a time: while you're on a job your screen shows only that customer, with navigation; other requests wait.
 
-## 3. How it works
+**Admins** (`/ops`) get live requests on a map, **ID verification** (approve or reject with an SMS to the person),
+team accounts and an audit log.
 
-### Requester — no login
-1. Opens the app, taps **Hold to speak** (browser Web Speech API) or types: *"Water is rising, my grandmother can't walk, ground floor, near Kadappakada."*
-2. Triage returns `{ type: "evacuation_mobility", urgency: "critical", skills: ["boat_owner","swimmer","driver_4x4"] }`.
-3. Screen shows a curated guidance card, a **Call 112** button, and live dispatch status: *"Pinging 3 helpers within 1 km… 0:27"*.
-4. On acceptance: helper name, skill, distance, phone.
+## What makes it different
 
-### Helper — phone number + OTP
-1. Registers skills, then toggles **On duty** during an event (shares location while on duty).
-2. Receives an incoming-request card in the app **and** an SMS: *"RESQ: person 400 m away needs a SWIMMER (flood, critical). Reply YES to accept, NO to skip. Expires in 30 s."*
-3. Accepts in the app or by replying YES, gets a maps link, marks the job done, gets rated.
+| | Urban Company / Housejoy | JustDial / Sulekha | **ResQ** |
+|---|---|---|---|
+| Who does the work | Company-curated staff | Lead lists | **Your own neighbours and local pros** |
+| Pricing | Fixed company menu | Unknown until you call | **Each provider's own range, shown upfront** |
+| Matching | Scheduled slots | You call around | **Live, within 10 km, by skill *and* tools** |
+| Offline workers | Excluded | Miss the lead | **Get an SMS, accept with one reply** |
+| Preparation | Worker arrives blind | — | **AI asks for photos and details first** |
+| Commission | Significant cut | Pay per lead | **Providers keep what they earn** |
 
-### Coordinator — `/ops`, password-gated
-Live map of open requests, unmatched escalations, helper coverage by skill. Requests that survive four waves with no acceptance are flagged **Escalated**.
+## Screenshots
 
-## 4. Triage: what the AI does and deliberately doesn't do
+| Home: services nearby | Booking: who will get it | AI job analysis | Worker's job brief |
+|---|---|---|---|
+| ![Home](docs/screenshots/home.png) | ![Booking](docs/screenshots/booking.png) | ![AI analysis](docs/screenshots/ai-analysis.png) | ![Job brief](docs/screenshots/job-brief.png) |
 
-| Task | Done by | Why |
-|---|---|---|
-| Classify free text into need type, urgency, skills | **Ollama** `qwen2.5:3b`, `format: json`, temperature 0, 4 s timeout | Local, structured output only, no cloud AI |
-| Fallback when the model is slow or confidence < 0.5 | Keyword rules in `lib/triage-rules.ts` + one fixed clarifying question | The demo never hangs |
-| "What do I do right now?" | **Curated guidance cards** (Red Cross / WHO first aid) selected by type | An LLM must not improvise medical advice |
-| Rank helpers | Weighted scoring formula (§5) | Explainable, tunable, no ML |
+## Tech stack
 
-Triage output schema (validated by a hand-written type guard, no schema libraries):
+| Layer | Choice |
+|---|---|
+| App | Next.js 16 (App Router), React 19, TypeScript (strict) |
+| UI | Tailwind CSS 4, hand-built SVG map (no map library) |
+| Live updates | Server-Sent Events (one snapshot per change) |
+| Database | MongoDB (users, jobs, locations, audit log, GridFS for ID proofs and job photos) |
+| Local AI | Ollama — `llama3.1`, falling back to `qwen2.5:3b`. Nothing leaves the machine |
+| SMS | Twilio (Verify for sign-in codes, Messaging for job alerts and one-reply acceptance) |
 
-```json
-{
-  "type": "flood_rescue | cardiac_no_breathing | bleeding | fracture | electrical | fire | trapped_structural | snakebite | evacuation_mobility | supplies_oxygen_meds | missing_person | other",
-  "urgency": "critical | high | medium | low",
-  "skills": ["doctor","nurse","first_aid","swimmer","boat_owner","electrician","plumber","driver_4x4","generator_owner","counselor","volunteer"],
-  "summary": "one line",
-  "confidence": 0.0
-}
+No paid APIs, no cloud AI, no third-party map SDK.
+
+---
+
+## Run it yourself
+
+### 1. Prerequisites
+
+```bash
+node --version      # 20+ (developed on 26)
+mongod --version    # MongoDB 7+   → brew install mongodb-community
+ollama --version    # https://ollama.com/download
 ```
 
-`lib/taxonomy.ts` holds the skill list and the default type → skills mapping; both Ollama's system prompt and the rules fallback read from it. Sample guidance card (`bleeding`): apply firm direct pressure with a clean cloth · keep pressing, don't peek · raise the limb if possible · do not remove embedded objects · call 112 if bleeding soaks through or the person is pale or drowsy.
+### 2. Clone and install
 
-## 5. Dispatch algorithm
-
-```
-candidates = onDuty helpers within radius(wave)          // 1 km, 2 km, 4 km, 8 km
-score      = 0.45*skillMatch + 0.30*proximity + 0.15*reliability + 0.10*recency
-             skillMatch  = |skillsNeeded ∩ helperSkills| / |skillsNeeded|
-             proximity   = max(0, 1 - distance/radius)      // haversine
-             reliability = rolling rating, starts 0.7
-             recency     = 1 if lastSeen < 10 min else 0.5
-
-each wave: ping top 3 not yet pinged (app event + SMS) → 30 s window
-  first YES wins → store.acceptDispatch() is atomic: succeeds only if request.status == "searching",
-                   then other pinged dispatches → "cancelled"
-  all 3 reject   → next wave immediately (don't wait for the timer)
-  timer expires  → dispatches → "expired", wave += 1, widen radius
-after 4 waves    → request.status = "escalated" → ops flag + "Call 112 now" prompt
+```bash
+git clone https://github.com/michaelharold/resq.git
+cd resq
+npm install
 ```
 
-Waves are advanced by `POST /api/requests/:id/tick`, called by the requester's screen every 30 s. It is idempotent, so no long-running timers are needed.
+### 3. Start MongoDB and the local AI
 
-## 6. Tech stack
+```bash
+mkdir -p ~/.local/mongodb-data
+mongod --dbpath ~/.local/mongodb-data --bind_ip 127.0.0.1 --fork --logpath /tmp/mongod.log
 
-### Allotted now — 70 / 100 credits
-
-| Item | Credits | Role |
-|---|---|---|
-| **Next.js** (App Router) | 35 | One codebase: `/` requester, `/helper`, `/ops`, plus all backend logic in Route Handlers |
-| **Ollama** | 20 | Local `qwen2.5:3b` for structured triage |
-| **Tailwind CSS** | 10 | Three role UIs in one night |
-| **Twilio** | 5 | SMS ping, YES/NO accept, requester updates, helper OTP login |
-| **TypeScript** | 0 | Language; shared types in `lib/types.ts` |
-
-### Data layer — pending (30 credits available)
-
-Persistence sits behind one interface, `lib/store/index.ts`. Development starts on `MemoryStore` today; the purchased adapter is added later and swapping is one import. **Status: the Firebase bid was lost, so the demo runs on `MemoryStore` unless one of the fallbacks below is purchased.**
-
-| Option | Credits | Adapter notes |
-|---|---|---|
-| **Firebase** — not obtained (bid lost) | 20 | `FirestoreStore` via `firebase-admin`; transaction for `acceptDispatch`; optional later swap of OTP login to Firebase Auth |
-| **MongoDB** (first fallback) | 25 | `MongoStore` via `mongodb` driver; `2dsphere` index on helpers; `findOneAndUpdate` on `status:"searching"` for the accept |
-| **PostgreSQL** | 25 | `PgStore` via `pg`; PostGIS `ST_DWithin`; `UPDATE … WHERE status='searching' RETURNING` |
-| **Redis + Socket.IO** | 10 + 10 | `RedisStore`; `GEOSEARCH` for radius; Lua script for the accept; Socket.IO replaces SSE |
-
-Nothing else on the list is worth buying: Socket.IO/Redis are redundant with SSE + Firestore, Prisma won't fit next to a DB, Material UI duplicates Tailwind.
-
-### Identity (works with every data option)
-- Requester: random UUID in `localStorage`, sent as `x-resq-uid` header. No login when you're in trouble.
-- Helper: phone → `POST /api/auth/otp/send` (Twilio SMS, 6-digit, 5 min) → `POST /api/auth/otp/verify` → HMAC-signed session in an httpOnly cookie (Node `crypto`, `SESSION_SECRET`).
-- Coordinator: `OPS_PASSWORD` env var gate on `/ops`.
-
-### Realtime (works with every data option)
-All mutations go through the API, which runs as **one Node process** on a laptop (Ollama already forces this). `lib/events.ts` is an in-process `EventEmitter`; Server-Sent Events routes forward its events to browsers: `/api/requests/:id/stream` (requester) and `/api/helpers/:id/stream` (helper, ops). Change streams / Firestore listeners are an optional upgrade, not a requirement.
-
-## 7. Architecture
-
-```mermaid
-flowchart LR
-  R[Requester PWA] -->|create / tick / respond| API[Next.js Route Handlers]
-  H[Helper PWA] -->|on duty / respond| API
-  O[Ops dashboard] --> API
-  API -->|SSE| R
-  API -->|SSE| H
-  API -->|SSE| O
-  API --> ST[(Store: Memory now, adapter later)]
-  API -->|triage JSON| OL[Ollama qwen2.5:3b]
-  API -->|SMS| TW[Twilio]
-  TW -->|inbound YES / NO / HELP| API
+ollama serve &            # if it is not already running
+ollama pull llama3.1      # ~4.9 GB; qwen2.5:3b (~2 GB) also works and is much lighter
 ```
 
-## 8. Data model (adapter-agnostic)
+### 4. Configure
 
-```
-Helper    { id, name, phone, skills[], location{lat,lng}|null, onDuty, reliability, lastSeen }
-Request   { id, requesterId, description, location{lat,lng}|null, channel: "app"|"sms",
-            triage{type,urgency,skills[],summary,confidence,source:"ollama"|"rules"}|null,
-            status: "triaging"|"searching"|"matched"|"resolved"|"escalated"|"cancelled",
-            wave, radiusKm, matchedHelperId|null, createdAt, updatedAt }
-Dispatch  { id, requestId, helperId, wave, score, channel: "app"|"sms",
-            status: "pinged"|"accepted"|"rejected"|"expired"|"cancelled", pingedAt, respondedAt|null }
-Rating    { id, requestId, helperId, stars, createdAt }
-Otp       { phone, code, expiresAt }
+```bash
+cp .env.example .env.local
 ```
 
-Guidance cards and landmarks are static TypeScript (`lib/guidance.ts`, `lib/landmarks.ts`) so they can be reviewed in a PR. SMS-in requests (`HELP <text>`) have no GPS: if the text matches a landmark, dispatch runs normally; otherwise the request is created with `location: null` and flagged for the coordinator.
+Everything works out of the box **except real SMS**. The important settings:
 
-## 9. Repository layout
+| Setting | What it does |
+|---|---|
+| `MONGODB_URI` | `mongodb://127.0.0.1:27017` (blank falls back to a local JSON file) |
+| `OLLAMA_SCOPE_MODEL` | `llama3.1`; falls back to `OLLAMA_MODEL` (`qwen2.5:3b`) automatically |
+| `RESQ_SHOW_OTP_ON_SCREEN` | `1` shows sign-in codes on screen so you can demo without Twilio |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET` | Twilio auth (API key recommended) |
+| `TWILIO_VERIFY_SERVICE_SID` | Sends real sign-in codes (`VA…`) |
+| `TWILIO_FROM` | A Twilio number; needed for job alerts and `ACCEPT` replies |
+| `OPS_USER`, `OPS_PASSWORD` | Admin login (default `coordinator` / `resq-ops`) |
+
+### 5. Run
+
+```bash
+npm run dev     # http://localhost:3000
+npm test        # 90 unit tests
+```
+
+30 demo providers are created around TKMCE, Kollam on first start, with services, price ranges, tool kits and
+verification badges.
+
+### 6. Try it in 5 minutes
+
+1. Open **http://localhost:3000/demo** and click **Open 4 users**. Each window is a separate person.
+2. Sign each in with a different 10-digit number and the code shown on screen.
+3. In one window pick **Plumber**, set a price range (₹350–₹700), tick the tools you carry, and stay **Available**.
+4. In another window tap **Plumber**, describe *"the pipe under my kitchen sink is leaking"* and press
+   **Analyse & request**. The AI lists the tools, time and photos to take; confirm and send.
+5. The provider window beeps with the job. Accept it, and both sides get each other's details, a live map and
+   navigation. Mark it done and rate.
+6. **Offline acceptance:** in `/ops` → SMS log you'll see the alert text with a 4-digit code. Simulate the reply:
+   ```bash
+   curl localhost:3000/api/twilio/webhook -H 'x-ops-password: resq-ops' \
+     --data-urlencode 'From=+919000000001' --data-urlencode 'Body=ACCEPT 1234'
+   ```
+   The job is assigned instantly and every other screen updates.
+7. **Admin:** open `/ops` (`coordinator` / `resq-ops`) for live requests, ID verification and the audit log.
+
+Phones on the same demo: `cloudflared tunnel --url http://localhost:3000` and open the HTTPS link (GPS and voice
+input need HTTPS).
+
+---
+
+## How it fits together
 
 ```
 app/
-  page.tsx                               requester flow
-  helper/page.tsx                        skills onboarding, on-duty toggle, incoming card
-  ops/page.tsx                           coordinator dashboard + SVG map
-  api/triage/route.ts                    POST {text} → triage JSON
-  api/auth/otp/send/route.ts             POST {phone}
-  api/auth/otp/verify/route.ts           POST {phone, code} → session cookie
-  api/helpers/route.ts                   POST upsert profile; PATCH on-duty + location
-  api/helpers/[id]/stream/route.ts       SSE: pings, cancellations
-  api/requests/route.ts                  POST create → triage → wave 1
-  api/requests/[id]/route.ts             GET status (polling fallback)
-  api/requests/[id]/tick/route.ts        POST advance wave / expire / escalate
-  api/requests/[id]/stream/route.ts      SSE: dispatch status, match
-  api/dispatches/[id]/respond/route.ts   POST {action: "accept"|"reject"}
-  api/ops/requests/route.ts              GET open + escalated requests (password gated)
-  api/twilio/inbound/route.ts            Twilio webhook: YES / NO / HELP <text>
+  page.tsx                     sign in → profile → home → book a service → live request
+  ops/page.tsx                 admin: live requests, ID verification, team & audit
+  api/
+    scope-task/                AI scoping (preview) + open job & dispatch (confirm)
+    twilio/webhook/            "ACCEPT 1234" from offline providers  → TwiML
+    services/                  who is nearby, price ranges, provider lists
+    dashboard/ + stream/       one live snapshot per person (SSE)
+    requests/, jobs/, helpers/, me/, auth/, ops/
 lib/
-  types.ts        taxonomy.ts    guidance.ts    landmarks.ts
-  triage.ts       (Ollama, timeout, type guard)   triage-rules.ts (fallback)
-  dispatch.ts     (score, selectWave, haversine)  events.ts (EventEmitter)
-  sms.ts          (Twilio send + message templates)
-  session.ts      (HMAC sign/verify)
-  store/index.ts  (Store interface + getStore())  store/memory.ts   store/<adapter>.ts
-scripts/seed.ts   30 helpers around SEED_CENTER with mixed skills
+  scope.ts        local AI job breakdown (prompt, JSON schema, hand-written guard)
+  matching.ts     $near within 10 km on skills + tools ($all → $in fallback)
+  jobs.ts         MongoDB `jobs`: GeoJSON, 4-digit codes, status mirrored from the engine
+  waves.ts        the request lifecycle: one accept wins, one job at a time
+  store/          in-memory engine (atomic accept) + MongoDB persistence
+  sms.ts, otp.ts, twilio.ts, files.ts, feed.ts, views.ts, events.ts, sse.ts
+components/       UI: TaskScopeModal, JobBrief, ServiceRequestView, ActiveJob, LiveMap, …
+docs/             WORKFLOW.md (how it works), UPGRADE.md, CONTRACTS.md
 ```
 
-`Store` interface (implement exactly this; keep it small):
+**Design note.** Accepting a job is decided in one place, under a per-request lock, so an in-app tap and an SMS
+`ACCEPT` can never both win. MongoDB stores accounts, jobs, photos and the audit log; live request state is held in
+memory (single process, by design) and mirrored to MongoDB on every change.
 
-```ts
-upsertHelper, getHelper, getOnDutyHelpers, setOnDuty,
-createRequest, getRequest, updateRequest, listOpenRequests,
-createDispatches, listDispatches(requestId), listPingedForHelper(helperId), updateDispatch,
-acceptDispatch(dispatchId): Promise<{ok:true; request} | {ok:false; reason:"already_matched"|"expired"|"not_found"}>,
-saveOtp, verifyOtp
-```
+## Limitations (honest list)
 
-## 10. Build rules for the coding agent
+- **In-app payment is a placeholder.** The flow ends at "Pay in app · coming soon".
+- **Live request state is in memory**, so a server restart clears in-flight requests. Accounts, jobs, photos and
+  logs survive in MongoDB.
+- **Twilio trial accounts** can only text verified numbers; the app falls back to on-screen codes in demo mode.
+- **ID verification is manual** and tiers are self-declared, pending real document checks.
+- Single process by design: fine for a venue or a ward, not yet for a city.
 
-1. **Dependencies:** `next`, `react`, `react-dom`, `typescript`, `tailwindcss` (+ its PostCSS deps), `twilio`. Nothing else — no zod, no leaflet, no mongoose, no next-auth, no uuid (use `crypto.randomUUID()`). When a data layer is purchased, add only its official driver (`firebase-admin`, `mongodb`, `pg`, or `redis` + `socket.io`).
-2. **Ollama is called only from Route Handlers**, never from the browser. Wrap in `AbortController` with a 4 s timeout; on timeout or invalid JSON, fall back to rules and set `triage.source = "rules"`.
-3. **All persistence goes through `getStore()`.** Components never touch the store; they call API routes. `MemoryStore` is the default and must be complete enough to run the whole demo (seeded at boot from `scripts/seed.ts` data).
-4. **Single-process assumption** is documented in `lib/events.ts`. Do not build multi-instance pub/sub.
-5. **Waves are tick-driven** (§5). The only immediate transition is "all pinged in this wave rejected → start next wave now".
-6. **Every route handler** validates input by hand and returns `{ error }` with a proper status. TypeScript `strict: true`.
-7. **Map with zero libraries:** `/ops` renders an inline SVG — equirectangular projection around `SEED_CENTER`, rings at 1/2/4/8 km, helpers as dots coloured by skill, requests as pulsing markers. Swap to a map library only if organisers confirm unlisted packages are allowed.
-8. **Mobile-first:** one-handed requester screen, ≥48 px touch targets, `tel:112` link always visible, dark mode via `prefers-color-scheme`.
-9. **Guidance shown to users is static text** from `lib/guidance.ts`. LLM output is only used for classification and the one-line summary.
-10. **Twilio trial** prefixes messages and only delivers to verified numbers; keep templates short and never depend on the prefix when parsing inbound replies (`YES`/`NO`/`HELP` are matched case-insensitively at the start of the body).
+## Roadmap
 
-## 11. Milestones and acceptance checks
-
-| # | Milestone | Done when |
-|---|---|---|
-| M0 | Scaffold | `npm run dev` serves `/`, `/helper`, `/ops` with Tailwind; `.env.example` complete; `ollama list` shows `qwen2.5:3b` |
-| M1 | Triage | `curl -X POST localhost:3000/api/triage -d '{"text":"father collapsed not breathing"}'` returns schema-valid JSON in < 4 s with `type: "cardiac_no_breathing"`; unplugging Ollama returns `source: "rules"`; 11 guidance cards present |
-| M2 | Store + dispatch | `POST /api/requests` creates the request, runs triage, creates 3 wave-1 dispatches; `tick` after 30 s expires them and creates wave 2 with a wider radius; two concurrent `accept` calls → exactly one `ok: true`; 4 empty waves → `escalated` |
-| M3 | Realtime | Requester screen updates via SSE without refresh; helper screen shows the incoming card within 1 s of ping; cancelled dispatches disappear on the losing helper's screen |
-| M4 | Twilio | Ping SMS sent on each dispatch; inbound `YES` accepts, `NO` rejects, `HELP trapped near hostel` creates a flagged request; OTP login issues a session cookie |
-| M5 | UI complete | Three screens finished; SVG map on `/ops` shows seeded helpers and live requests; Lighthouse mobile usability ≥ 90 |
-| M6 | Demo | `npm run seed` places 30 helpers; §13 script runs end to end on two phones; backup video recorded |
-
-Kickoff prompt for the coding agent:
-
-> Read README.md fully. Implement milestones M0–M6 in order, one milestone per commit. Follow §10 build rules exactly; if a rule blocks you, stop and explain instead of adding a dependency. After each milestone run its acceptance check from §11 and report the result before continuing. Use `MemoryStore` throughout; do not create a database adapter until told which one was purchased.
-
-## 12. Quick start
-
-### Running it on this laptop (status: all milestones working on `MemoryStore`)
-
-```bash
-~/.local/bin/ollama serve &                       # Ollama lives in ~/.local (Homebrew needs `sudo xcodebuild -license accept`)
-npm run dev                                       # http://localhost:3000 · 30 demo helpers are seeded at boot
-npm test                                          # 35 unit tests (dispatch, waves, triage, landmarks, taxonomy)
-~/.local/bin/cloudflared tunnel --url http://localhost:3000   # HTTPS URL for phones (GPS + voice need HTTPS)
-```
-
-| Screen | URL | Notes |
-|---|---|---|
-| App (everyone) | `/` | **Sign in** with phone + code → **profile**: name, age, blood group, address, medical notes, emergency contact, **skills** and **equipment** → **dashboard**. The dashboard has **Ask for help** (one question: what's happening; name, phone, medical details and location come from the profile) and, below it, **people nearby who need your skills or equipment**. Tap a card to see the requester's full details, then **I'll help** (both sides get each other's details, live tracking starts) or **Not now**. Accounts are stored locally in `.data/accounts.json`. |
-| Demo launcher | `/demo` | Opens phone-sized windows side by side; every window is a separate signed-in person. |
-| Authorities | `/ops` | Username + password (default `coordinator` / `resq-ops`). Live dispatch, **Disaster zones** (everyone's lat/lng inside a declared area, CSV, SMS alert) and **Team & audit**. |
-
-Multi-window demo: in `/ops` press **Seeded helpers off**, open 2–3 helper windows and one requester window from `/demo`, and every on-duty helper window beeps with the request. Once a helper accepts, their position streams every 3 s (simulated travel on a laptop, real GPS on phones) and the requester's map and distance update live.
-
-Triage: the local model classifies; if a strong keyword rule disagrees (e.g. rising water plus someone who cannot walk → evacuation), the rule wins and the card shows "Keyword rules". Guidance text is always curated, never model-written.
-
-```bash
-git clone <repo> && cd resq
-npm install
-cp .env.example .env.local
-ollama pull qwen2.5:3b                        # ~2 GB, do this first
-npm run seed && npm run dev
-cloudflared tunnel --url http://localhost:3000   # HTTPS URL for phones + Twilio webhook
-```
-
-`.env.local`
-```
-TWILIO_ACCOUNT_SID=   TWILIO_AUTH_TOKEN=   TWILIO_FROM=+1...
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:3b
-SESSION_SECRET=<random 32 bytes>
-OPS_PASSWORD=<demo password>
-SEED_CENTER_LAT=8.913   SEED_CENTER_LNG=76.635    # approx. TKMCE, Kollam
-STORE=memory                                     # later: firestore | mongo | pg | redis
-```
-
-Setup checklist
-- Twilio console → Messaging → inbound webhook `https://<tunnel>/api/twilio/inbound`.
-- Verify every demo phone on the Twilio trial at hour 0.
-- Phones must open the **tunnel HTTPS URL**: browser geolocation refuses insecure origins.
-
-## 13. Demo script (90 seconds)
-
-1. Helper phone: OTP login, toggle **On duty** (plus 30 seeded helpers around campus).
-2. Requester phone: hold to speak — *"flood water rising, grandmother can't walk, ground floor"*.
-3. Triage result and guidance card appear; countdown starts; `/ops` map shows the new request.
-4. Helper 1 taps **Reject** → next candidate pinged instantly; Helper 2 replies **YES** by SMS.
-5. Requester sees name, skill, distance, phone; helper gets the maps link; `/ops` shows *Matched*.
-6. Kill the requester's wifi, text `HELP trapped near TKMCE hostel` to the Twilio number → request appears on `/ops` flagged *SMS-in*, located via the landmark table.
-
-## 14. Safety, privacy, limits
-
-- Curated guidance only; the LLM never generates instructions.
-- Exact location is shared only with the accepted helper; others see distance.
-- Skills are self-declared with ratings; licence verification is roadmap.
-- **Call 112** is always on screen; four failed waves escalate to the coordinator.
-- Not a substitute for official emergency services.
-
-## 15. Roadmap
-
-- Purchased data adapter with persistence across restarts (Firebase / MongoDB / PostgreSQL / Redis)
-- Push notifications for helpers when the app is closed (SMS covers this today)
-- Malayalam voice input and SMS
-- Verified professional badges (doctor/nurse licence upload)
-- Official responder handoff to district control rooms
-- Offline mesh (BLE) for zero-connectivity zones
-
-## 16. Team
-
-| Name | Role | Owned |
-|---|---|---|
-| | Backend | store, dispatch loop, triage, Twilio webhook, OTP |
-| | Frontend | requester + helper flows, SSE client |
-| | Frontend / data | ops dashboard, SVG map, guidance cards, seed data |
-| | Pitch | demo script, backup video |
+Help Credits (a neighbourhood time bank for small favours), neighbour vouching, tool lending between neighbours,
+booking for family in another town, AI fair-price guidance from what neighbours actually paid, group bookings for a
+building, and a community mode that turns the same network into a volunteer response during floods or landslides.
