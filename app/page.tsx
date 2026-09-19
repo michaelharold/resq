@@ -6,15 +6,15 @@ import { Icon } from "@/components/icons";
 import { Badge, BottomNav, Call112Bar, Container, Countdown, ETABadge, Logo, NavBar, PhoneShell, ProgressBar, PulsingDot, TopNav, TypingDots, initials } from "@/components/ui";
 import { EMERGENCY_TILES, SKILL_META, SkillPill, URGENCY_STYLE } from "@/components/skills";
 import { LiveMap, type MapMarker } from "@/components/LiveMap";
-import { api, etaMinutes, fmtDistance, fmtTime, getPosition, getUid, type LatLng } from "@/lib/client/api";
+import { DEMO_RADIUS_KM, api, distanceKm, etaMinutes, fmtDistance, fmtTime, getPosition, getUid, windowStore, type LatLng } from "@/lib/client/api";
 import { useSecondsLeft, useSnapshot } from "@/lib/client/sse";
 import { useSpeech } from "@/lib/client/speech";
 import { TYPE_LABELS } from "@/lib/taxonomy";
 import type { RequestView, RequesterRole, Skill } from "@/lib/types";
 
-type Config = { seedCenter: LatLng; waveWindowMs: number; smsSimulated: boolean; smsNumber: string | null };
+type Config = { seedCenter: LatLng; waveWindowMs: number; smsSimulated: boolean; smsNumber: string | null; landmarks: { name: string; location: LatLng }[] };
 type Nearby = { center: LatLng; area: string | null; count: number; helpers: { skills: Skill[]; distanceKm: number; at: LatLng }[] };
-type Loc = { at: LatLng; source: "gps" | "demo" };
+type Loc = { at: LatLng; source: "gps" | "demo"; label: string };
 const ACTIVE_KEY = "resq_active_request";
 
 export default function RequesterApp() {
@@ -22,36 +22,44 @@ export default function RequesterApp() {
   const [requestId, setRequestId] = useState<string | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [loc, setLoc] = useState<Loc | null>(null);
+  const [welcome, setWelcome] = useState(false);
 
   useEffect(() => {
     void api<Config>("/api/config").then((r) => r.ok && setConfig(r.data));
     void fetch("/api/triage").catch(() => undefined); // warm the model so the first triage is fast
-    try {
-      const id = localStorage.getItem(ACTIVE_KEY);
-      if (id) { setRequestId(id); setView("request"); }
-    } catch { /* private mode */ }
+    const id = windowStore.get(ACTIVE_KEY);
+    if (id) { setRequestId(id); setView("request"); }
+    else if (!windowStore.get("resq_welcomed")) setWelcome(true);
   }, []);
 
+  // GPS when it is plausibly at the venue; otherwise (e.g. a laptop elsewhere) a demo spot at the seed centre.
   useEffect(() => {
     if (!config) return;
-    void getPosition().then((p) => setLoc(p ? { at: p, source: "gps" } : { at: config.seedCenter, source: "demo" }));
+    const saved = windowStore.get("resq_loc");
+    if (saved) { try { setLoc(JSON.parse(saved) as Loc); return; } catch { /* ignore */ } }
+    void getPosition().then((p) => {
+      if (p && distanceKm(p, config.seedCenter) <= DEMO_RADIUS_KM) setLoc({ at: p, source: "gps", label: "Your GPS location" });
+      else setLoc({ at: config.seedCenter, source: "demo", label: "Demo: TKMCE campus" });
+    });
   }, [config]);
+  const chooseLoc = (l: Loc) => { setLoc(l); windowStore.set("resq_loc", JSON.stringify(l)); };
 
   const openRequest = (id: string) => {
-    try { localStorage.setItem(ACTIVE_KEY, id); } catch { /* ignore */ }
+    windowStore.set(ACTIVE_KEY, id);
     setRequestId(id);
     setView("request");
   };
   const closeRequest = () => {
-    try { localStorage.removeItem(ACTIVE_KEY); } catch { /* ignore */ }
+    windowStore.set(ACTIVE_KEY, null);
     setRequestId(null);
     setView("home");
   };
+  if (welcome) return <Welcome onClose={() => { windowStore.set("resq_welcomed", "1"); setWelcome(false); }} />;
 
   return (
     <PhoneShell>
       {view === "home" && <Home loc={loc} config={config} onRequest={() => setView("report")} />}
-      {view === "report" && <Report loc={loc} onBack={() => setView("home")} onCreated={openRequest} />}
+      {view === "report" && <Report loc={loc} config={config} onChooseLoc={chooseLoc} onBack={() => setView("home")} onCreated={openRequest} />}
       {view === "request" && requestId && <RequestScreen id={requestId} config={config} onClose={closeRequest} onRetry={openRequest} />}
     </PhoneShell>
   );
@@ -97,7 +105,7 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
               <div className="mt-2 flex items-center gap-2">
                 <PulsingDot color="green" />
                 <span className="text-xs font-medium text-white/70">
-                  Live coverage{nearby?.area ? ` · ${nearby.area}` : ""}{loc?.source === "demo" ? " (demo location)" : ""}
+                  Live coverage{nearby?.area ? ` · ${nearby.area}` : ""}{loc?.source === "demo" ? " · demo location" : ""}
                 </span>
               </div>
             </div>
@@ -203,7 +211,9 @@ function Home({ loc, config, onRequest }: { loc: Loc | null; config: Config | nu
 
 // ─── Report ────────────────────────────────────────────────────────────────────────────────────────────────
 
-function Report({ loc, onBack, onCreated }: { loc: Loc | null; onBack: () => void; onCreated: (id: string) => void }) {
+function Report({ loc, config, onChooseLoc, onBack, onCreated }: { loc: Loc | null; config: Config | null; onChooseLoc: (l: Loc) => void; onBack: () => void; onCreated: (id: string) => void }) {
+  const [name, setName] = useState(() => windowStore.get("resq_name") ?? "");
+  const [phone, setPhone] = useState(() => windowStore.get("resq_phone") ?? "");
   const [mode, setMode] = useState<"text" | "voice">("text");
   const [tile, setTile] = useState<string | null>(null);
   const [text, setText] = useState("");
@@ -228,15 +238,17 @@ function Report({ loc, onBack, onCreated }: { loc: Loc | null; onBack: () => voi
     if (!description) { setError("Tell us what is happening, or pick a type."); return; }
     setBusy(true);
     setError(null);
+    windowStore.set("resq_name", name.trim() || null);
+    windowStore.set("resq_phone", phone.trim() || null);
     const pos = loc?.at ?? null;
     const r = await api<RequestView>("/api/requests", {
-      body: { description, location: pos, ...(role ? { role } : {}) },
+      body: { description, location: pos, ...(role ? { role } : {}), ...(name.trim() ? { name: name.trim() } : {}), ...(phone.trim() ? { phone: phone.trim() } : {}) },
       headers: { "x-resq-uid": getUid() },
     });
     setBusy(false);
     if (r.ok) onCreated(r.data.request.id);
     else setError(r.status === 0 ? "No connection. Text HELP to the ResQ number, or call 112." : `Could not send (${r.error}). Call 112.`);
-  }, [tile, role, loc, onCreated]);
+  }, [tile, role, loc, onCreated, name, phone]);
 
   const stopAndSend = () => {
     speech.stop();
@@ -325,10 +337,35 @@ function Report({ loc, onBack, onCreated }: { loc: Loc | null; onBack: () => voi
           <p className="mt-1.5 text-xs text-resq-slate">Changes what we tell you to do while help comes. Leave blank and we will guess.</p>
         </div>
 
-        <p className="mt-4 flex items-center gap-1.5 text-xs text-resq-slate">
-          <Icon.MapPin size={12} />
-          {loc ? (loc.source === "gps" ? "Sharing your GPS location with the helper who accepts." : "Location unavailable: using the demo location near TKMCE.") : "Getting your location…"}
-        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="rname" className="mb-1.5 block text-sm font-semibold text-resq-navy">Your name <span className="font-normal text-resq-slate">(optional)</span></label>
+            <input id="rname" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoComplete="name"
+              className="min-h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none focus:ring-2 focus:ring-resq-red/30" />
+          </div>
+          <div>
+            <label htmlFor="rphone" className="mb-1.5 block text-sm font-semibold text-resq-navy">Phone <span className="font-normal text-resq-slate">(optional)</span></label>
+            <input id="rphone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" placeholder="So the helper can call you"
+              className="min-h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none focus:ring-2 focus:ring-resq-red/30" />
+          </div>
+        </div>
+        <p className="mt-1.5 text-xs text-resq-slate">Shared only with the helper who accepts. No account needed.</p>
+
+        <label htmlFor="rloc" className="mb-1.5 mt-4 flex items-center gap-1.5 text-sm font-semibold text-resq-navy"><Icon.MapPin size={14} />Where are you?</label>
+        <select id="rloc" value={loc?.label ?? ""} onChange={(e) => {
+            const v = e.target.value;
+            if (v === "__gps") { void getPosition().then((p) => p && onChooseLoc({ at: p, source: "gps", label: "Your GPS location" })); return; }
+            const lm = config?.landmarks.find((l) => `Demo: ${l.name}` === v);
+            if (v === "Demo: TKMCE campus" && config) onChooseLoc({ at: config.seedCenter, source: "demo", label: v });
+            else if (lm) onChooseLoc({ at: lm.location, source: "demo", label: v });
+          }}
+          className="min-h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-resq-navy">
+          {loc?.source === "gps" && <option value="Your GPS location">Your GPS location</option>}
+          <option value="__gps">Use my GPS</option>
+          <option value="Demo: TKMCE campus">Demo: TKMCE campus</option>
+          {config?.landmarks.map((l) => <option key={l.name} value={`Demo: ${l.name}`}>Demo: {l.name}</option>)}
+        </select>
+        <p className="mt-1.5 text-xs text-resq-slate">{loc?.source === "gps" ? "Your exact location goes only to the helper who accepts." : "Demo location, used because this device's GPS is not near the demo area."}</p>
         {error && <p role="alert" className="mt-3 rounded-xl bg-resq-red-light p-3 text-sm font-medium text-resq-red">{error}</p>}
         <button onClick={() => void submit()} disabled={!text.trim() && !tile}
           className={`mt-4 min-h-14 w-full rounded-2xl font-display text-lg font-bold transition-all ${text.trim() || tile ? "bg-resq-red text-white shadow-lg" : "cursor-not-allowed bg-slate-200 text-slate-400"}`}>
@@ -502,6 +539,7 @@ function MatchedCard({ view }: { view: RequestView }) {
   const h = view.matchedHelper!;
   const r = view.request;
   const eta = etaMinutes(h.distanceKm);
+  const arrived = h.distanceKm !== null && h.distanceKm < 0.05;
   const markers: MapMarker[] = [];
   if (r.location) markers.push({ id: "you", at: r.location, color: "#DC2626", kind: "you", label: "You" });
   if (h.location) markers.push({ id: "helper", at: h.location, color: "#16A34A", kind: "target", label: h.name.split(" ")[0].slice(0, 7) });
@@ -521,8 +559,10 @@ function MatchedCard({ view }: { view: RequestView }) {
         </div>
         {view.request.status === "matched" && (
           <div className="mt-4 flex items-center justify-center gap-3">
-            <ETABadge minutes={eta} />
-            <div className="flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-1.5 text-resq-navy"><Icon.MapPin size={14} /><span className="text-sm font-medium">{fmtDistance(h.distanceKm)} away</span></div>
+            {arrived ? <Badge variant="success">Arrived at your location</Badge> : <>
+              <ETABadge minutes={eta} />
+              <div className="flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-1.5 text-resq-navy"><Icon.MapPin size={14} /><span className="text-sm font-medium">{fmtDistance(h.distanceKm)} away</span></div>
+            </>}
           </div>
         )}
       </div>
@@ -530,7 +570,7 @@ function MatchedCard({ view }: { view: RequestView }) {
         <div className="card-shadow relative overflow-hidden rounded-2xl">
           <LiveMap center={r.location} radiusKm={radius} markers={markers} height={180} route={h.location ? [h.location, r.location] : undefined} />
           <div className="absolute left-4 top-4 flex items-center gap-2 rounded-xl border border-slate-100 bg-white px-3 py-1.5 shadow">
-            <Icon.Navigation size={14} className="text-resq-green" /><span className="text-xs font-bold text-resq-navy">En route · ~{eta} min</span>
+            <Icon.Navigation size={14} className="text-resq-green" /><span className="text-xs font-bold text-resq-navy">{arrived ? "Arrived" : `Live · ${fmtDistance(h.distanceKm)} · ~${eta} min`}</span>
           </div>
         </div>
       )}
@@ -663,5 +703,48 @@ function Timeline({ view }: { view: RequestView }) {
         </ol>
       </div>
     </section>
+  );
+}
+
+// ─── Welcome (first visit in a window) ─────────────────────────────────────────────────────────────────────
+
+function Welcome({ onClose }: { onClose: () => void }) {
+  const roles = [
+    { title: "I need help", sub: "No account. Describe it by voice or text; we ping the 3 best-placed neighbours.", icon: <Icon.AlertTriangle size={24} />, cls: "bg-resq-red", onClick: onClose },
+    { title: "I can help", sub: "Sign in with your phone, add your skills, go on duty and receive pings.", icon: <Icon.Shield size={24} />, cls: "bg-resq-green", href: "/helper" },
+    { title: "Coordinator", sub: "Ward officers and NGOs: live map, escalations and coverage.", icon: <Icon.Activity size={24} />, cls: "bg-resq-cyan", href: "/ops" },
+  ];
+  return (
+    <div className="flex min-h-dvh flex-col bg-navy-gradient">
+      <Container className="flex flex-1 flex-col items-center justify-center gap-8 px-6 py-10">
+        <div className="animate-slide-up flex flex-col items-center gap-4 text-center">
+          <div className="relative">
+            <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-resq-red" style={{ boxShadow: "0 0 60px rgba(220,38,38,.4)" }}><Logo size={48} /></div>
+            <div className="animate-spin-slow absolute -inset-3 border border-white/10" style={{ borderRadius: "40%" }} />
+          </div>
+          <h1 className="font-display text-5xl font-bold tracking-tight text-white">ResQ</h1>
+          <p className="font-mono text-xs uppercase tracking-widest text-white/50">Community emergency network</p>
+          <p className="max-w-sm text-lg font-light text-white/80">Help is closer than you think.</p>
+        </div>
+        <div className="grid w-full max-w-3xl gap-3 md:grid-cols-3">
+          {roles.map((r) => {
+            const inner = (
+              <>
+                <div className={`mb-3 flex h-12 w-12 items-center justify-center rounded-2xl text-white ${r.cls}`}>{r.icon}</div>
+                <p className="font-display text-lg font-bold text-white">{r.title}</p>
+                <p className="mt-1 text-sm text-white/60">{r.sub}</p>
+              </>
+            );
+            return r.href
+              ? <Link key={r.title} href={r.href} className="rounded-2xl border border-white/15 bg-white/5 p-5 text-left transition-colors hover:bg-white/10">{inner}</Link>
+              : <button key={r.title} onClick={r.onClick} className="rounded-2xl border border-white/15 bg-white/5 p-5 text-left transition-colors hover:bg-white/10">{inner}</button>;
+          })}
+        </div>
+        <Link href="/demo" className="flex min-h-12 items-center gap-2 rounded-xl border border-white/20 px-5 text-sm font-semibold text-white/80 hover:text-white">
+          <Icon.Expand size={16} />Presenting? Open the multi-window demo guide
+        </Link>
+        <p className="flex items-center gap-2 text-xs text-white/40"><Icon.Phone size={12} />ResQ complements 112. It does not replace emergency services.</p>
+      </Container>
+    </div>
   );
 }

@@ -87,13 +87,14 @@ async function expirePinged(id: string): Promise<void> {
 export type NewRequestInput = {
   requesterId: string; requesterPhone: string | null; requesterHelperId: string | null; description: string;
   location: LatLng | null; locationSource: LocationSource; landmark: string | null; channel: Channel; role?: RequesterRole;
+  requesterName?: string | null;
 };
 
 export async function createHelpRequest(input: NewRequestInput): Promise<HelpRequest> {
   const store = getStore();
   const now = nowIso();
   const created = await store.createRequest({
-    id: randomUUID(), ...input, role: input.role ?? inferRole(input.description), triage: null, status: "triaging", wave: 0, radiusKm: 0, waveStartedAt: null,
+    id: randomUUID(), ...input, requesterName: input.requesterName ?? null, role: input.role ?? inferRole(input.description), triage: null, status: "triaging", wave: 0, radiusKm: 0, waveStartedAt: null,
     matchedHelperId: null, createdAt: now, updatedAt: now,
   });
   emit("request:updated", { request: created });

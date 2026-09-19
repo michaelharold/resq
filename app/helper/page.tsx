@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { Badge, BottomNav, Call112Bar, Container, NavBar, PhoneShell, ProgressBar, PulsingDot, TopNav, initials } from "@/components/ui";
 import { SKILL_META, SkillPill, URGENCY_STYLE } from "@/components/skills";
-import { api, fmtDistance, getPosition } from "@/lib/client/api";
+import { DEMO_RADIUS_KM, api, demoSpot, distanceKm, fmtDistance, getHelperToken, getPosition, setHelperToken, stepToward, windowStore, type LatLng } from "@/lib/client/api";
+import { LiveMap, type MapMarker } from "@/components/LiveMap";
 import { useSecondsLeft, useSnapshot } from "@/lib/client/sse";
 import { SKILLS, TYPE_LABELS } from "@/lib/taxonomy";
 import type { Helper, HelperView, IncomingCard, Skill } from "@/lib/types";
@@ -51,9 +52,9 @@ function Login({ onDone }: { onDone: () => void }) {
   };
   const verify = async () => {
     setBusy(true); setMsg(null);
-    const r = await api("/api/auth/otp/verify", { body: { phone, code } });
+    const r = await api<{ token: string }>("/api/auth/otp/verify", { body: { phone, code } });
     setBusy(false);
-    if (r.ok) onDone(); else setMsg(r.error === "invalid_code" ? "That code is wrong or expired." : `Could not verify (${r.error}).`);
+    if (r.ok) { setHelperToken(r.data.token); onDone(); } else setMsg(r.error === "invalid_code" ? "That code is wrong or expired." : `Could not verify (${r.error}).`);
   };
 
   return (
@@ -65,6 +66,11 @@ function Login({ onDone }: { onDone: () => void }) {
         </div>
         <h1 className="font-display text-3xl font-bold text-white">Become a ResQ helper</h1>
         <p className="mt-2 text-sm text-white/70">Your skills can save a neighbour. Sign in with your phone to go on duty.</p>
+        <ol className="mx-auto mt-5 flex max-w-md justify-center gap-2 text-xs text-white/70">
+          {["Verify phone", "Add skills", "Go on duty"].map((t, i) => (
+            <li key={t} className="flex items-center gap-1.5"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/15 font-bold text-white">{i + 1}</span>{t}</li>
+          ))}
+        </ol>
       </div>
       <main className="relative z-10 mx-auto -mt-5 w-full max-w-md flex-1 px-5 md:-mt-10">
         <div className="card-shadow-lg rounded-2xl border border-slate-100 bg-white p-5">
@@ -103,9 +109,9 @@ function Profile({ phone, helper, onSaved, onCancel }: { phone: string; helper?:
   const toggle = (s: Skill) => setSkills((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
   const save = async () => {
     setBusy(true); setMsg(null);
-    const r = await api("/api/helpers", { body: { name, phone, skills } });
+    const r = await api<{ token?: string }>("/api/helpers", { body: { name, phone, skills } });
     setBusy(false);
-    if (r.ok) onSaved(); else setMsg(`Could not save (${r.error}).`);
+    if (r.ok) { if (r.data.token) setHelperToken(r.data.token); onSaved(); } else setMsg(`Could not save (${r.error}).`);
   };
   return (
     <>
@@ -151,39 +157,77 @@ function Profile({ phone, helper, onSaved, onCancel }: { phone: string; helper?:
 
 function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () => void; onReload: () => void }) {
   const id = initial.helper!.id;
-  const { data, connected, setData } = useSnapshot<Me>(`/api/helpers/${id}/stream`, "/api/helpers/me");
+  const token = getHelperToken() ?? "none";
+  const { data, connected, setData } = useSnapshot<Me>(`/api/helpers/${id}/stream?s=${encodeURIComponent(token)}`, "/api/helpers/me", { "x-resq-session": token });
   const me = data ?? initial;
   const helper = me.helper ?? initial.helper!;
   const [editing, setEditing] = useState(false);
   const [locMsg, setLocMsg] = useState<string | null>(null);
   const [taken, setTaken] = useState<string | null>(null);
   const prevCount = useRef(0);
+  const [center, setCenter] = useState<LatLng | null>(null);
+  const [mode, setMode] = useState<"gps" | "demo">(() => (windowStore.get("resq_loc_mode") as "gps" | "demo") ?? "gps");
+  const pos = useRef<LatLng | null>(helper.location);
+  pos.current = helper.location ?? pos.current;
+  useEffect(() => { void api<{ seedCenter: LatLng }>("/api/config").then((r) => r.ok && setCenter(r.data.seedCenter)); }, []);
 
-  // Buzz when a new ping arrives.
+  // New ping: vibrate, beep, and flag the tab title.
   useEffect(() => {
-    if (me.pinged.length > prevCount.current) { try { navigator.vibrate?.([250, 100, 250]); } catch { /* unsupported */ } }
+    if (me.pinged.length > prevCount.current) {
+      try { navigator.vibrate?.([250, 100, 250]); } catch { /* unsupported */ }
+      beep();
+    }
     prevCount.current = me.pinged.length;
+    document.title = me.pinged.length ? `(${me.pinged.length}) Emergency nearby · ResQ` : "ResQ Helper";
   }, [me.pinged.length]);
 
-  // While on duty, share location every 60 s.
-  useEffect(() => {
-    if (!helper.onDuty) return;
-    const push = async () => {
+  /** Where this helper is now: GPS (if at the venue) or this window's demo spot. */
+  const locate = useCallback(async (m = mode): Promise<LatLng | null> => {
+    if (!center) return null;
+    if (m === "gps") {
       const p = await getPosition();
-      if (p) { await api("/api/helpers", { method: "PATCH", body: { location: p } }); setLocMsg(null); }
-      else if (!helper.location) setLocMsg("Location unavailable: allow location access so we can match you.");
-    };
-    void push();
-    const t = setInterval(push, 60_000);
+      if (p && distanceKm(p, center) <= DEMO_RADIUS_KM) { setLocMsg(null); return p; }
+      setLocMsg(p ? "Your GPS is far from the demo area, so a demo spot is used." : "GPS unavailable, so a demo spot is used.");
+      setMode("demo"); windowStore.set("resq_loc_mode", "demo");
+    }
+    return demoSpot(center);
+  }, [center, mode]);
+  const pushLocation = useCallback(async (p: LatLng) => {
+    pos.current = p;
+    await api("/api/helpers", { method: "PATCH", body: { location: p } });
+  }, []);
+
+  // On duty with no job: refresh location every 60 s.
+  useEffect(() => {
+    if (!helper.onDuty || me.active || !center) return;
+    const t = setInterval(async () => { const p = await locate(); if (p) await pushLocation(p); }, 60_000);
     return () => clearInterval(t);
-  }, [helper.onDuty, helper.location]);
+  }, [helper.onDuty, me.active, center, locate, pushLocation]);
+
+  // On a job: stream location every 3 s so the requester sees you coming. Demo mode simulates the trip.
+  const activeId = me.active?.request.id ?? null;
+  const tLat = me.active?.request.location?.lat ?? null, tLng = me.active?.request.location?.lng ?? null;
+  useEffect(() => {
+    if (!activeId || tLat === null || tLng === null) return;
+    const target = { lat: tLat, lng: tLng };
+    const t = setInterval(async () => {
+      if (mode === "gps") { const p = await getPosition(3000); if (p) await pushLocation(p); return; }
+      const cur = pos.current;
+      if (cur && distanceKm(cur, target) > 0.005) await pushLocation(stepToward(cur, target, 0.06));
+    }, 3000);
+    return () => clearInterval(t);
+  }, [activeId, tLat, tLng, mode, pushLocation]);
 
   const toggleDuty = async () => {
     const onDuty = !helper.onDuty;
-    const p = onDuty ? await getPosition() : null;
-    if (onDuty && !p && !helper.location) setLocMsg("We need your location to match you with nearby emergencies.");
+    const p = onDuty ? await locate() : null;
     const r = await api<{ helper: Helper }>("/api/helpers", { method: "PATCH", body: { onDuty, ...(p ? { location: p } : {}) } });
     if (r.ok) setData({ ...me, helper: r.data.helper });
+  };
+  const changeLoc = async (m: "gps" | "demo", reroll = false) => {
+    setMode(m); windowStore.set("resq_loc_mode", m);
+    const p = m === "demo" && center ? demoSpot(center, reroll) : await locate(m);
+    if (p) await pushLocation(p);
   };
   const respond = async (card: IncomingCard, action: "accept" | "reject") => {
     const r = await api<{ ok: boolean; reason?: string }>(`/api/dispatches/${card.dispatch.id}/respond`, { body: { action } });
@@ -196,7 +240,7 @@ function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () 
     await api(`/api/requests/${me.active.request.id}`, { method: "PATCH", body: { action: "resolve" } });
     void onReloadSnapshot();
   };
-  const logout = async () => { await api("/api/auth/logout", { method: "POST", body: {} }); onLogout(); };
+  const logout = async () => { await api("/api/auth/logout", { method: "POST", body: {} }); setHelperToken(null); document.title = "ResQ"; onLogout(); };
 
   if (editing) return <Profile phone={me.phone} helper={helper} onCancel={() => setEditing(false)} onSaved={() => { setEditing(false); onReload(); }} />;
 
@@ -241,7 +285,7 @@ function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () 
             <button onClick={() => setTaken(null)} aria-label="Dismiss" className="ml-auto flex h-10 w-10 items-center justify-center"><Icon.X size={16} /></button>
           </div>
         )}
-        {me.active && <ActiveJob active={me.active} onDone={done} />}
+        {me.active && <ActiveJob active={me.active} me={helper.location} simulated={mode === "demo"} onDone={done} />}
         {me.pinged.map((c) => <Incoming key={c.dispatch.id} card={c} onRespond={respond} />)}
         {!me.active && me.pinged.length === 0 && (
           <div className="card-shadow rounded-2xl border border-slate-100 bg-white p-6 text-center">
@@ -263,6 +307,17 @@ function Dashboard({ initial, onLogout, onReload }: { initial: Me; onLogout: () 
             <div className="rounded-xl bg-slate-50 p-3 text-center"><p className="font-display text-base font-bold text-resq-navy">{(helper.reliability * 5).toFixed(1)}★</p><p className="text-xs text-resq-slate">Reliability</p></div>
             <div className="rounded-xl bg-slate-50 p-3 text-center"><p className="font-display text-base font-bold text-resq-navy">{me.phone}</p><p className="text-xs text-resq-slate">Phone</p></div>
           </div>
+        </section>
+        <section className="card-shadow rounded-2xl border border-slate-100 bg-white p-4">
+          <h2 className="mb-1 flex items-center gap-2 font-display font-semibold text-resq-navy"><Icon.MapPin size={16} />My location</h2>
+          <p className="text-sm text-resq-slate">
+            {helper.location && center ? `${mode === "gps" ? "GPS" : "Demo spot"} · ${fmtDistance(distanceKm(helper.location, center))} from TKMCE` : "Not shared yet. Go on duty to share it."}
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button onClick={() => changeLoc("gps")} aria-pressed={mode === "gps"} className={`min-h-11 rounded-xl border-2 text-sm font-semibold ${mode === "gps" ? "border-resq-navy bg-resq-navy text-white" : "border-slate-200 text-resq-navy"}`}>Use GPS</button>
+            <button onClick={() => changeLoc("demo", mode === "demo")} className={`min-h-11 rounded-xl border-2 text-sm font-semibold ${mode === "demo" ? "border-resq-navy bg-resq-navy text-white" : "border-slate-200 text-resq-navy"}`}>{mode === "demo" ? "New demo spot" : "Demo spot"}</button>
+          </div>
+          <p className="mt-2 text-xs text-resq-slate">Demo spots are 200–900 m from TKMCE, different in every window, and travel towards the emergency once you accept.</p>
         </section>
         <button onClick={logout} className="min-h-12 w-full rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-resq-slate">Sign out</button>
         </div>
@@ -308,9 +363,14 @@ function Incoming({ card, onRespond }: { card: IncomingCard; onRespond: (c: Inco
   );
 }
 
-function ActiveJob({ active, onDone }: { active: NonNullable<HelperView["active"]>; onDone: () => void }) {
+function ActiveJob({ active, me, simulated, onDone }: { active: NonNullable<HelperView["active"]>; me: LatLng | null; simulated: boolean; onDone: () => void }) {
   const r = active.request;
   const t = r.triage;
+  const dist = me && r.location ? distanceKm(me, r.location) : null;
+  const arrived = dist !== null && dist < 0.05;
+  const markers: MapMarker[] = [];
+  if (r.location) markers.push({ id: "req", at: r.location, color: "#DC2626", kind: "target", label: "Help" });
+  if (me) markers.push({ id: "me", at: me, color: "#16A34A", kind: "you", label: "You", pulse: false });
   return (
     <section className="card-shadow-lg animate-slide-up overflow-hidden rounded-2xl border-2 border-resq-green bg-white">
       <div className="bg-success-gradient px-5 py-4">
@@ -320,6 +380,15 @@ function ActiveJob({ active, onDone }: { active: NonNullable<HelperView["active"
       </div>
       <div className="space-y-3 p-4">
         <p className="rounded-xl bg-slate-50 p-3 text-sm text-resq-navy">“{r.description}”</p>
+        {r.location && (
+          <div className="relative overflow-hidden rounded-2xl">
+            <LiveMap center={r.location} radiusKm={Math.max(0.3, (dist ?? 0.5) * 1.3)} markers={markers} height={190} route={me ? [me, r.location] : undefined} />
+            <div className="absolute left-3 top-3 rounded-xl bg-white px-3 py-1.5 text-xs font-bold text-resq-navy shadow">
+              {arrived ? "You have arrived" : `${fmtDistance(dist)} to go${simulated ? " · simulated travel" : " · live GPS"}`}
+            </div>
+          </div>
+        )}
+        {(r.requesterName || r.requesterPhone) && <p className="text-sm text-resq-navy"><strong>Requester:</strong> {r.requesterName ?? "Unnamed"}{r.requesterPhone ? ` · ${r.requesterPhone}` : ""}</p>}
         {active.mapsUrl && (
           <a href={active.mapsUrl} target="_blank" rel="noopener noreferrer" className="flex min-h-14 items-center justify-center gap-2 rounded-2xl bg-resq-navy font-semibold text-white shadow-lg">
             <Icon.Navigation size={18} />Navigate in Maps
@@ -332,4 +401,21 @@ function ActiveJob({ active, onDone }: { active: NonNullable<HelperView["active"
       </div>
     </section>
   );
+}
+
+/** Short two-tone alert via Web Audio (no audio files). Browsers allow it after the user has clicked on the page. */
+function beep() {
+  try {
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    [880, 660, 880].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = f; o.connect(g); g.connect(ctx.destination);
+      const t0 = ctx.currentTime + i * 0.18;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+      o.start(t0); o.stop(t0 + 0.17);
+    });
+    setTimeout(() => void ctx.close(), 1000);
+  } catch { /* no audio */ }
 }

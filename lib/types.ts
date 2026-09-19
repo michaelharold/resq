@@ -48,7 +48,8 @@ export type LocationSource = "gps" | "landmark" | "none";
 export type HelpRequest = {
   id: string;
   requesterId: string; // app: x-resq-uid; sms: "sms:+91..."
-  requesterPhone: string | null; // set for channel "sms" so we can text updates back; null for app requests
+  requesterName: string | null; // optional, app requests: shown to the accepted helper only
+  requesterPhone: string | null; // SMS sender, or the optional phone an app requester gave; shown to the accepted helper only
   // The requester's own helper record, if any — excluded from selectWave.
   // app: getHelperSession(req)?.helperId ?? null; sms: (await store.getHelperByPhone(phone))?.id ?? null
   requesterHelperId: string | null;

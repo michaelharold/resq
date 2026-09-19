@@ -1,3 +1,4 @@
+import { LANDMARKS } from "@/lib/landmarks";
 /**
  * GET /api/config → { seedCenter, waveWindowMs, smsSimulated, ollamaModel }
  * (CONTRACTS §6; README §10 rule 7 — the browser needs the seed centre and wave window).
@@ -35,5 +36,6 @@ export async function GET(): Promise<Response> {
   const ollamaModel = modelRaw && modelRaw.trim() ? modelRaw.trim() : "qwen2.5:3b";
 
   const smsNumber = process.env.TWILIO_FROM?.trim() || null;
-  return NextResponse.json({ seedCenter, waveWindowMs, smsSimulated, ollamaModel, smsNumber }, { status: 200 });
+  const landmarks = LANDMARKS.map((l) => ({ name: l.name, location: l.location }));
+  return NextResponse.json({ seedCenter, waveWindowMs, smsSimulated, ollamaModel, smsNumber, landmarks }, { status: 200 });
 }

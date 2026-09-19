@@ -16,7 +16,7 @@ export const POST = safe(async (req: Request) => {
   if (!(await store.verifyOtp(phone, code))) return jsonError(401, "invalid_code");
   const helper = await store.getHelperByPhone(phone);
   const token = sign({ phone, helperId: helper?.id ?? null, exp: Date.now() + HELPER_SESSION_MAX_AGE_SEC * 1000 });
-  return json({ ok: true, helper }, 200, {
+  return json({ ok: true, helper, token }, 200, {
     "set-cookie": serializeCookie(SESSION_COOKIE, token, { maxAgeSec: HELPER_SESSION_MAX_AGE_SEC, secure: isSecureRequest(req) }),
   });
 });

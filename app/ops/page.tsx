@@ -160,6 +160,7 @@ function Dashboard() {
               </table>
             </div>
           )}
+          <DemoControls data={data} />
           <SmsPanel data={data} />
         </section>
       </main>
@@ -233,6 +234,30 @@ function SmsPanel({ data }: { data: Ops }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function DemoControls({ data }: { data: Ops }) {
+  const [msg, setMsg] = useState<string | null>(null);
+  const seededOn = data.helpers.filter((h) => h.id.startsWith("seed-helper-") && h.onDuty).length;
+  const act = async (action: string, label: string) => {
+    const r = await api<{ helpers?: number; cancelled?: number }>("/api/ops/demo", { body: { action } });
+    setMsg(r.ok ? label : `Failed (${r.error})`);
+  };
+  return (
+    <div className="card-shadow rounded-2xl bg-white p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-display font-semibold text-resq-navy">Demo controls</h2>
+        <a href="/demo" target="_blank" className="text-sm font-semibold text-resq-cyan">Open launcher →</a>
+      </div>
+      <p className="mt-1 text-xs text-resq-slate">{seededOn} of 30 seeded helpers on duty. Switch them off so only real helper windows get pinged.</p>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <button onClick={() => act("seeded_off", "Seeded helpers are off duty")} className="min-h-11 rounded-xl bg-resq-navy text-xs font-semibold text-white">Seeded helpers off</button>
+        <button onClick={() => act("seeded_on", "Seeded helpers are on duty")} className="min-h-11 rounded-xl border border-slate-200 text-xs font-semibold text-resq-navy">Seeded helpers on</button>
+        <button onClick={() => { if (confirm("Cancel every open request?")) void act("reset", "All open requests cancelled"); }} className="min-h-11 rounded-xl border border-resq-red/30 bg-resq-red-light text-xs font-semibold text-resq-red">Reset requests</button>
+      </div>
+      {msg && <p className="mt-2 text-xs font-medium text-resq-green">{msg}</p>}
     </div>
   );
 }

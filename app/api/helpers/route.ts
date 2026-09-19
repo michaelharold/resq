@@ -50,12 +50,12 @@ export const POST = safe(async (req: Request) => {
   });
   emit("helper:updated", { helper });
   const headers: HeadersInit = {};
+  let token: string | undefined;
   if (!ops && s) {
-    headers["set-cookie"] = serializeCookie(SESSION_COOKIE, sign({ phone, helperId: helper.id, exp: Date.now() + HELPER_SESSION_MAX_AGE_SEC * 1000 }), {
-      maxAgeSec: HELPER_SESSION_MAX_AGE_SEC, secure: isSecureRequest(req),
-    });
+    token = sign({ phone, helperId: helper.id, exp: Date.now() + HELPER_SESSION_MAX_AGE_SEC * 1000 });
+    headers["set-cookie"] = serializeCookie(SESSION_COOKIE, token, { maxAgeSec: HELPER_SESSION_MAX_AGE_SEC, secure: isSecureRequest(req) });
   }
-  return json({ helper }, 200, headers);
+  return json({ helper, token }, 200, headers);
 });
 
 export const PATCH = safe(async (req: Request) => {

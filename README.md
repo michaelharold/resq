@@ -229,7 +229,10 @@ npm test                                          # 35 unit tests (dispatch, wav
 |---|---|---|
 | Requester | `/` | No login. Pick a type and/or describe it (text or hold-to-speak). "It's me / Someone else" switches the curated guidance between victim and witness steps. |
 | Helper | `/helper` | Phone + OTP. Without Twilio credentials the code is shown on screen (simulated SMS). Go **On duty** to receive pings. |
+| Demo launcher | `/demo` | Opens phone-sized windows side by side. **Every window is a separate person** (identity is per window), so one laptop can run a requester and several helpers. |
 | Coordinator | `/ops` | Password `OPS_PASSWORD` (default `resq-ops`). Live map, escalations, coverage by skill, SMS log, and a **Simulate inbound SMS** box for `YES` / `NO` / `HELP …` without Twilio. |
+
+Multi-window demo: in `/ops` press **Seeded helpers off**, open 2–3 helper windows and one requester window from `/demo`, and every on-duty helper window beeps with the request. Once a helper accepts, their position streams every 3 s (simulated travel on a laptop, real GPS on phones) and the requester's map and distance update live.
 
 Triage: the local model classifies; if a strong keyword rule disagrees (e.g. rising water plus someone who cannot walk → evacuation), the rule wins and the card shows "Keyword rules". Guidance text is always curated, never model-written.
 

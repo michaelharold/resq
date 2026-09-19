@@ -17,8 +17,14 @@ export function getRequesterId(req: Request): string | null {
   const uid = req.headers.get("x-resq-uid");
   return isUid(uid) ? uid : null;
 }
+/**
+ * Helper identity. Browser windows share cookies, so the web app sends the token per window: header
+ * `x-resq-session` (or `?s=` for EventSource). "none" means "this window is not signed in" and deliberately
+ * ignores the cookie, so one browser can run a requester and several helpers side by side.
+ */
 export function getHelperSession(req: Request): HelperSession | null {
-  const t = parseCookies(req.headers.get("cookie"))[SESSION_COOKIE];
+  const header = req.headers.get("x-resq-session") ?? new URL(req.url).searchParams.get("s");
+  const t = header !== null ? (header === "none" ? "" : header) : parseCookies(req.headers.get("cookie"))[SESSION_COOKIE];
   const s = t ? verify<HelperSession>(t) : null;
   return s && typeof s.phone === "string" ? s : null;
 }
