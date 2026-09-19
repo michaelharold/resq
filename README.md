@@ -216,6 +216,23 @@ Kickoff prompt for the coding agent:
 
 ## 12. Quick start
 
+### Running it on this laptop (status: all milestones working on `MemoryStore`)
+
+```bash
+~/.local/bin/ollama serve &                       # Ollama lives in ~/.local (Homebrew needs `sudo xcodebuild -license accept`)
+npm run dev                                       # http://localhost:3000 · 30 demo helpers are seeded at boot
+npm test                                          # 35 unit tests (dispatch, waves, triage, landmarks, taxonomy)
+~/.local/bin/cloudflared tunnel --url http://localhost:3000   # HTTPS URL for phones (GPS + voice need HTTPS)
+```
+
+| Screen | URL | Notes |
+|---|---|---|
+| Requester | `/` | No login. Pick a type and/or describe it (text or hold-to-speak). "It's me / Someone else" switches the curated guidance between victim and witness steps. |
+| Helper | `/helper` | Phone + OTP. Without Twilio credentials the code is shown on screen (simulated SMS). Go **On duty** to receive pings. |
+| Coordinator | `/ops` | Password `OPS_PASSWORD` (default `resq-ops`). Live map, escalations, coverage by skill, SMS log, and a **Simulate inbound SMS** box for `YES` / `NO` / `HELP …` without Twilio. |
+
+Triage: the local model classifies; if a strong keyword rule disagrees (e.g. rising water plus someone who cannot walk → evacuation), the rule wins and the card shows "Keyword rules". Guidance text is always curated, never model-written.
+
 ```bash
 git clone <repo> && cd resq
 npm install

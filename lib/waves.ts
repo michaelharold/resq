@@ -26,6 +26,8 @@ export function withRequestLock<T>(requestId: string, fn: () => Promise<T>): Pro
 }
 
 const nowIso = () => new Date().toISOString();
+/** Clock-skew tolerance for tick(): 1 s, but never more than a tenth of the window. */
+const grace = () => Math.min(TICK_GRACE_MS, waveWindowMs() / 10);
 
 // ── internal transitions (call only while holding the lock) ─────────────────────────────────────────────────────
 
@@ -117,7 +119,7 @@ export function tick(id: string): Promise<{ advanced: boolean; request: HelpRequ
     const store = getStore();
     const r = await store.getRequest(id);
     if (!r || r.status !== "searching") return { advanced: false, request: r };
-    const elapsed = r.waveStartedAt === null || Date.now() - Date.parse(r.waveStartedAt) >= waveWindowMs() - TICK_GRACE_MS;
+    const elapsed = r.waveStartedAt === null || Date.now() - Date.parse(r.waveStartedAt) >= waveWindowMs() - grace();
     const ds = await store.listDispatches(id);
     if (!elapsed && ds.some((d) => d.wave === r.wave && d.status === "pinged")) return { advanced: false, request: r };
     await expirePinged(id);
@@ -224,7 +226,7 @@ export async function tickDueRequests(): Promise<number> {
   let n = 0;
   for (const r of await getStore().listOpenRequests()) {
     if (r.status !== "searching") continue;
-    if (r.waveStartedAt && Date.now() - Date.parse(r.waveStartedAt) < waveWindowMs() - TICK_GRACE_MS) continue;
+    if (r.waveStartedAt && Date.now() - Date.parse(r.waveStartedAt) < waveWindowMs() - grace()) continue;
     if ((await tick(r.id)).advanced) n++;
   }
   return n;
