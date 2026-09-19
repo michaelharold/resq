@@ -34,5 +34,6 @@ export async function GET(): Promise<Response> {
   const modelRaw = process.env.OLLAMA_MODEL;
   const ollamaModel = modelRaw && modelRaw.trim() ? modelRaw.trim() : "qwen2.5:3b";
 
-  return NextResponse.json({ seedCenter, waveWindowMs, smsSimulated, ollamaModel }, { status: 200 });
+  const smsNumber = process.env.TWILIO_FROM?.trim() || null;
+  return NextResponse.json({ seedCenter, waveWindowMs, smsSimulated, ollamaModel, smsNumber }, { status: 200 });
 }

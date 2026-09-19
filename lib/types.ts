@@ -108,7 +108,7 @@ export type DispatchPublic = Pick<Dispatch, "id" | "wave" | "status" | "distance
 };
 
 /** The matched helper as shown to the requester; distanceKm = the accepted dispatch's distanceKm. */
-export type HelperPublic = Pick<Helper, "id" | "name" | "skills" | "phone"> & { distanceKm: number | null };
+export type HelperPublic = Pick<Helper, "id" | "name" | "skills" | "phone" | "location" | "reliability"> & { distanceKm: number | null };
 
 /** GET /api/requests/:id, POST .../tick, requester SSE snapshot. */
 export type RequestView = {

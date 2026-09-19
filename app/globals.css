@@ -1,15 +1,54 @@
 @import "tailwindcss";
 
-@layer base {
-  body {
-    background-color: #ffffff;
-    color: #0a0a0a;
-  }
+/* ResQ design tokens (from the Figma Make design) */
+@theme {
+  --color-resq-red: #DC2626;
+  --color-resq-red-light: #FEF2F2;
+  --color-resq-red-dark: #991B1B;
+  --color-resq-navy: #1E3A5F;
+  --color-resq-navy-dark: #0F1F33;
+  --color-resq-green: #16A34A;
+  --color-resq-green-light: #F0FDF4;
+  --color-resq-cyan: #0EA5E9;
+  --color-resq-cyan-light: #F0F9FF;
+  --color-resq-amber: #D97706;
+  --color-resq-slate: #64748B;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-display: var(--font-dm-sans), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+}
 
-  @media (prefers-color-scheme: dark) {
-    body {
-      background-color: #0a0a0a;
-      color: #f5f5f5;
-    }
-  }
+html, body {
+  background: #F1F5F9;
+  color: #1E3A5F;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+@keyframes dispatch-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: .8; } }
+@keyframes slide-in-up { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spin-slow { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+@keyframes typing-dot { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
+@keyframes marker-pulse { 0% { r: 6; opacity: .7; } 100% { r: 18; opacity: 0; } }
+
+.animate-dispatch-pulse { animation: dispatch-pulse 2s ease-in-out infinite; }
+.animate-slide-up { animation: slide-in-up .4s ease-out both; }
+.animate-fade-in { animation: fade-in .3s ease-out both; }
+.animate-spin-slow { animation: spin-slow 8s linear infinite; }
+.typing-dot-1 { animation: typing-dot 1.2s ease-in-out infinite; }
+.typing-dot-2 { animation: typing-dot 1.2s ease-in-out .2s infinite; }
+.typing-dot-3 { animation: typing-dot 1.2s ease-in-out .4s infinite; }
+.marker-pulse { animation: marker-pulse 1.6s ease-out infinite; }
+
+.card-shadow { box-shadow: 0 1px 3px rgba(30,58,95,.08), 0 4px 16px rgba(30,58,95,.06); }
+.card-shadow-lg { box-shadow: 0 4px 24px rgba(30,58,95,.12), 0 1px 4px rgba(30,58,95,.08); }
+.bg-emergency-gradient { background: linear-gradient(135deg, #DC2626 0%, #991B1B 100%); }
+.bg-navy-gradient { background: linear-gradient(160deg, #1E3A5F 0%, #0F1F33 100%); }
+.bg-success-gradient { background: linear-gradient(135deg, #16A34A 0%, #15803D 100%); }
+.bg-ai-gradient { background: linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%); }
+.timeline-line { position: absolute; left: 11px; width: 2px; background: linear-gradient(to bottom, #DC2626, #16A34A); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
