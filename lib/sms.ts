@@ -61,3 +61,7 @@ export const tplRequesterMatched = (i: { name: string; skill: Skill; distanceKm:
 export const tplRequesterEscalated = () => "RESQ: No helper could be reached. A coordinator is alerted. Call 112 now.";
 export const tplHelperAccepted = (i: { mapsUrl: string | null; phone: string | null }) =>
   `RESQ: You're matched. Map: ${i.mapsUrl ?? "location unknown"}. Call the requester: ${i.phone ?? "via app"}.`;
+
+/** Sent to helpers who were pinged but did not take the job, once the request is closed. */
+export const tplRequestClosed = (i: { typeLabel: string; outcome: "resolved" | "cancelled" }) =>
+  `RESQ: The ${i.typeLabel} request near you has been ${i.outcome === "resolved" ? "resolved" : "cancelled"}. No action needed. Thank you.`;

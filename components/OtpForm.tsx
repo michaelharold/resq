@@ -9,15 +9,17 @@ export function OtpForm({ onDone, cta = "Verify & continue" }: { onDone: (helper
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [sentTo, setSentTo] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const send = async () => {
     setBusy(true); setMsg(null);
-    const r = await api<{ devCode?: string }>("/api/auth/otp/send", { body: { phone } });
+    const r = await api<{ devCode?: string; phone: string }>("/api/auth/otp/send", { body: { phone } });
     setBusy(false);
-    if (r.ok) { setSent(true); setDevCode(r.data.devCode ?? null); }
-    else if (r.error === "sms_failed") { setSent(true); setMsg("SMS failed. Ask the organiser for your code."); }
+    if (r.ok) { setSent(true); setSentTo(r.data.phone); setDevCode(r.data.devCode ?? null); }
+    else if (r.error === "sms_failed") setMsg("We couldn't text that number. Check it and try again in 30 seconds.");
+    else if (r.error === "sms_not_configured") setMsg("SMS sign-in isn't set up on this server yet. Ask the organiser.");
     else setMsg(r.error === "phone_invalid" ? "Enter a valid mobile number." : r.error === "too_many_requests" ? `Wait ${String(r.data.retryAfterSec ?? 30)} s before asking again.` : `Could not send code (${r.error}).`);
   };
   const verify = async () => {
@@ -39,7 +41,9 @@ export function OtpForm({ onDone, cta = "Verify & continue" }: { onDone: (helper
           <input id="otp-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} autoFocus
             onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
             placeholder="••••••" className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 px-4 font-mono text-xl tracking-[.5em] outline-none focus:ring-2 focus:ring-resq-green/30" />
-          {devCode && <p className="mt-2 rounded-xl bg-resq-cyan-light p-2.5 text-xs text-resq-navy">Demo mode (no SMS configured): your code is <strong className="font-mono">{devCode}</strong></p>}
+          {devCode
+            ? <p className="mt-2 rounded-xl bg-amber-50 p-2.5 text-xs text-amber-900">Offline demo mode: your code is <strong className="font-mono">{devCode}</strong></p>
+            : <p className="mt-2 text-xs text-resq-slate">We sent a 6-digit code by SMS to <strong>{sentTo ?? phone}</strong>. It expires in 5 minutes.</p>}
         </>
       )}
       {msg && <p role="alert" className="mt-3 text-sm font-medium text-resq-red">{msg}</p>}
@@ -51,7 +55,7 @@ export function OtpForm({ onDone, cta = "Verify & continue" }: { onDone: (helper
         className="mt-4 min-h-14 w-full rounded-2xl bg-success-gradient font-display text-lg font-bold text-white shadow-lg disabled:opacity-50">
         {busy ? "Please wait…" : sent ? cta : "Send code"}
       </button>
-      {sent && <button type="button" onClick={() => { setSent(false); setCode(""); setDevCode(null); }} className="mt-2 min-h-12 w-full text-sm font-semibold text-resq-slate">Change number</button>}
+      {sent && <button type="button" onClick={() => { setSent(false); setCode(""); setDevCode(null); setSentTo(null); }} className="mt-2 min-h-12 w-full text-sm font-semibold text-resq-slate">Change number</button>}
     </form>
   );
 }

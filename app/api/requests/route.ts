@@ -2,7 +2,8 @@ import { getHelperSession, getRequesterId } from "@/lib/auth";
 import { isLatLng, json, jsonError, pricingOf, readJson, safe, text } from "@/lib/validate";
 import { normalizePhone } from "@/lib/sms";
 import { getStore } from "@/lib/store";
-import { createHelpRequest } from "@/lib/waves";
+import { createHelpRequest, onReject } from "@/lib/waves";
+import { emit } from "@/lib/events";
 import { buildRequestView } from "@/lib/views";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +38,16 @@ export const POST = safe(async (req: Request) => {
   const pricing = pricingOf(b);
   if (!pricing.ok) return jsonError(400, pricing.error);
   if (pricing.value.category === "HOUSEHOLD_MICROGIG" && !account) return jsonError(401, "unauthenticated", { detail: "A paid household job needs a signed-in account." });
+  // Someone who asks for help is not available to help others: pause their availability (they switch it back on
+  // themselves when they are safe) and hand any pings they were holding to the next helper.
+  if (account) {
+    const fresh = await getStore().getHelper(account.id);
+    if (fresh?.onDuty) {
+      const paused = await getStore().upsertHelper({ ...fresh, onDuty: false, availabilityPausedAt: new Date().toISOString() });
+      emit("helper:updated", { helper: paused });
+      for (const d of await getStore().listPingedForHelper(account.id)) await onReject(d.id);
+    }
+  }
   const r = await createHelpRequest({
     requesterId, requesterPhone: requesterPhone ?? account?.phone ?? null, requesterName: requesterName ?? account?.name ?? null,
     requesterProfile: account?.profile ?? null, requesterHelperId: account?.id ?? null, description,

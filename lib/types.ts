@@ -35,6 +35,7 @@ export type Helper = {
   trustTier?: TrustTier;        // read via tierOf() — absent on older records = TIER_1_NEIGHBOR
   credentialId?: string | null; // licence / registration number given for Tier 2 / Tier 3 (self-declared in the demo)
   walletBalance?: number;       // read via walletOf() — credited when escrow is released
+  availabilityPausedAt?: string | null; // set when availability was switched off automatically because this person asked for help
   profile?: UserProfile;   // basic details collected at sign-up
 };
 

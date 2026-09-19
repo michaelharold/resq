@@ -336,6 +336,14 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
     return () => clearInterval(t);
   }, [activeId, tLat, tLng, beacon.source]);
 
+  // The request someone is reading was taken, finished or cancelled by now → close it and say so.
+  useEffect(() => {
+    if (open && !dash.feed.some((f) => f.request.id === open.request.id)) {
+      setOpen(null);
+      setToast("That request is no longer open: someone else took it or it was closed.");
+    }
+  }, [dash.feed, open]);
+
   const toggleAvailable = async () => {
     const r = await api<{ helper: Helper }>("/api/helpers", { method: "PATCH", body: { onDuty: !me.onDuty } });
     if (r.ok) setData({ ...dash, me: r.data.helper });
@@ -381,7 +389,7 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
           <div className="mt-4 grid gap-2 md:grid-cols-2">
             <button onClick={toggleAvailable} aria-pressed={me.onDuty}
               className={`flex min-h-14 items-center justify-between rounded-2xl px-4 text-left ${me.onDuty ? "bg-resq-green" : "bg-white/10"}`}>
-              <div><p className="font-display font-bold text-white">{me.onDuty ? "Available to help" : "Not available"}</p><p className="text-xs text-white/75">{me.onDuty ? "You get alerts for matching requests" : "Tap to receive alerts"}</p></div>
+              <div><p className="font-display font-bold text-white">{me.onDuty ? "Available to help" : "Not available"}</p><p className="text-xs text-white/75">{me.onDuty ? "You get alerts for matching requests" : me.availabilityPausedAt ? "Paused after you asked for help · tap when safe" : "Tap to receive alerts"}</p></div>
               <div className={`flex h-7 w-12 items-center rounded-full p-1 ${me.onDuty ? "justify-end bg-white/30" : "justify-start bg-white/20"}`}><div className="h-5 w-5 rounded-full bg-white" /></div>
             </button>
             <BeaconChip light paused={beacon.paused} ago={beacon.ago} source={beacon.source} onToggle={(p) => void beacon.setPaused(p)} />
@@ -431,7 +439,19 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
           </div>
           <div className="space-y-3">
             {dash.feed.map((f) => <FeedCard key={f.request.id} f={f} onOpen={() => setOpen(f)} />)}
-            {dash.feed.length === 0 && (
+            {!me.onDuty && (
+              <div className="card-shadow rounded-2xl border-2 border-amber-300 bg-amber-50 p-5">
+                <p className="font-display font-bold text-amber-900">{me.availabilityPausedAt ? "Availability paused because you asked for help" : "You are not available to help"}</p>
+                <p className="mt-1 text-sm text-amber-900/80">
+                  {me.availabilityPausedAt
+                    ? `We switched it off at ${fmtTime(me.availabilityPausedAt)} so nobody expects you to respond. Switch it back on only when you are safe.`
+                    : "You won't see or be alerted about nearby requests until you switch it on."}
+                  {dash.hiddenWhileUnavailable ? ` ${dash.hiddenWhileUnavailable} matching request${dash.hiddenWhileUnavailable > 1 ? "s are" : " is"} waiting nearby.` : ""}
+                </p>
+                <button onClick={toggleAvailable} className="mt-3 min-h-12 w-full rounded-xl bg-resq-green font-semibold text-white">I&apos;m available to help again</button>
+              </div>
+            )}
+            {me.onDuty && dash.feed.length === 0 && (
               <div className="card-shadow rounded-2xl border border-slate-100 bg-white p-6 text-center">
                 <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100"><Icon.Bell size={26} className="text-resq-slate" /></div>
                 <p className="font-display font-semibold text-resq-navy">No one nearby needs your help right now</p>

@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { emit } from "./events";
 import { getStore } from "./store";
 import { MAX_WAVES, TICK_GRACE_MS, WAVE_RADII_KM, haversineKm, selectWave, waveWindowMs } from "./dispatch";
-import { formatDistance, mapsUrl, sendSms, tplPing, tplRequesterEscalated, tplRequesterMatched } from "./sms";
+import { formatDistance, mapsUrl, sendSms, tplPing, tplRequesterEscalated, tplRequesterMatched, tplRequestClosed } from "./sms";
 import { triage } from "./triage";
 import { inferRole } from "./role";
 import { releaseEscrowLocked, withHelperLock, type EscrowRelease } from "./escrow";
@@ -335,6 +335,27 @@ export async function decline(requestId: string, helperId: string): Promise<void
 
 type Simple = { ok: true; request: HelpRequest } | { ok: false; reason: "conflict" | "not_found" };
 
+/**
+ * A request is closed (done or cancelled): the app feeds drop it on the next snapshot, and everyone who was pinged
+ * by SMS gets a "no action needed" text so their phone does not keep asking them to help. Skips the helper who
+ * took the job and anyone who already declined. Fire-and-forget; never throws.
+ */
+async function notifyClosed(r: HelpRequest, outcome: "resolved" | "cancelled"): Promise<void> {
+  try {
+    const store = getStore();
+    const typeLabel = r.triage ? TYPE_SMS_LABELS[r.triage.type] : "emergency";
+    const helperIds = new Set((await store.listDispatches(r.id))
+      .filter((d) => d.helperId !== r.matchedHelperId && d.status !== "rejected")
+      .map((d) => d.helperId));
+    for (const id of helperIds) {
+      const h = await store.getHelper(id);
+      if (h?.phone) void sendSms(h.phone, tplRequestClosed({ typeLabel, outcome }));
+    }
+  } catch (e) {
+    console.error("[waves] closure notice failed", e);
+  }
+}
+
 export function cancel(id: string): Promise<Simple> {
   return withRequestLock(id, async () => {
     const store = getStore();
@@ -348,6 +369,7 @@ export function cancel(id: string): Promise<Simple> {
     }
     const request = (await store.updateRequest(id, { status: "cancelled", waveStartedAt: null, ...(r.escrowStatus === "HELD" ? { escrowStatus: "REFUNDED" as const } : {}) })) as HelpRequest;
     emit("request:updated", { request });
+    void notifyClosed(request, "cancelled");
     return { ok: true, request };
   });
 }
@@ -363,6 +385,7 @@ export function resolve(id: string): Promise<Simple> {
     const released = await releaseEscrowLocked(id);
     if (released.ok) request = released.request;
     if (!released.ok || released.alreadyReleased) emit("request:updated", { request }); // a fresh release already emitted it
+    void notifyClosed(request, "resolved");
     return { ok: true, request };
   });
 }

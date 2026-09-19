@@ -103,5 +103,10 @@ export const PATCH = safe(async (req: Request) => {
   const helper = (await store.setOnDuty(id, typeof b.onDuty === "boolean" ? b.onDuty : cur.onDuty, isLatLng(b.location) ? b.location : undefined)) as Helper;
   emit("helper:updated", { helper });
   if (b.onDuty === false) for (const d of await store.listPingedForHelper(id)) await onReject(d.id);
+  if (b.onDuty === true && helper.availabilityPausedAt) {
+    const cleared = await store.upsertHelper({ ...helper, availabilityPausedAt: null });
+    emit("helper:updated", { helper: cleared });
+    return json({ helper: cleared });
+  }
   return json({ helper });
 });

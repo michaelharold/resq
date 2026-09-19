@@ -24,13 +24,14 @@ export type FeedItem = {
 export type Dashboard = {
   me: Helper | null; phone: string; active: HelperView["active"]; myRequest: HelpRequest | null;
   feed: FeedItem[]; otherNearby: number; radiusKm: number;
+  hiddenWhileUnavailable: number; // matching requests nearby that are not shown because availability is off
 };
 
 export async function buildDashboard(helperId: string | null, phone: string): Promise<Dashboard> {
   const store = getStore();
   const me = helperId ? await store.getHelper(helperId) : null;
   const open = await store.listOpenRequests();
-  const base: Dashboard = { me, phone, active: null, myRequest: null, feed: [], otherNearby: 0, radiusKm: FEED_RADIUS_KM };
+  const base: Dashboard = { me, phone, active: null, myRequest: null, feed: [], otherNearby: 0, radiusKm: FEED_RADIUS_KM, hiddenWhileUnavailable: 0 };
   if (!me) return base;
   base.active = (await buildHelperView(me.id)).active;
   base.myRequest = open.find((r) => r.requesterHelperId === me.id && r.status !== "resolved" && r.status !== "cancelled") ?? null;
@@ -58,5 +59,7 @@ export async function buildDashboard(helperId: string | null, phone: string): Pr
   base.feed.sort((a, b) => Number(b.picked) - Number(a.picked)
     || (URGENCY_RANK[a.request.triage?.urgency ?? "low"] - URGENCY_RANK[b.request.triage?.urgency ?? "low"])
     || (a.distanceKm ?? 99) - (b.distanceKm ?? 99));
+  // Not available (switched off, or paused automatically after asking for help): no requests, no alerts.
+  if (!me.onDuty) { base.hiddenWhileUnavailable = base.feed.length; base.feed = []; }
   return base;
 }
