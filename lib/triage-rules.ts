@@ -26,9 +26,14 @@
  * 7. skills = TYPE_SKILLS[type] (copied); summary = TYPE_LABELS[type] + ": " + first ~80
  *    chars of the cleaned text; clarifyingQuestion = CLARIFYING_QUESTION iff confidence
  *    < 0.5 (it never blocks dispatch — CONTRACTS §6).
+ * 8. Upgrade (docs/UPGRADE.md §2, §5): `equipment = detectEquipmentByRules(text)` and
+ *    `hazardAlert = hazardAlertFor(detectHazardByRules(text))`. Both detectors are exported
+ *    because lib/triage.ts runs them on EVERY request: when the hazard rules fire they win
+ *    over the model (deterministic), and rule equipment is unioned with the model's list.
  */
-import { NO_HAZARD } from "./hazards";
-import type { NeedType, TriageResult, Urgency } from "./types";
+import { hazardAlertFor } from "./hazards";
+import type { HazardKind } from "./hazards";
+import type { Equipment, NeedType, TriageResult, Urgency } from "./types";
 import { CLARIFYING_QUESTION, NEED_TYPES, TYPE_LABELS, TYPE_SKILLS, URGENCIES } from "./taxonomy";
 
 type Rule = { pattern: RegExp; weight: number };
@@ -299,6 +304,264 @@ export function normalizeText(input: unknown): string {
     .trim();
 }
 
+// ---------------------------------------------------------------------------
+// Hidden scene hazards (docs/UPGRADE.md §2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Like normalizeText, but sentence punctuation survives as the clause marker " | " so that a
+ * pattern can never join two clauses: "My father collapsed. Building 4" must not read as
+ * "collapsed building". Hyphens become spaces ("first-aid kit", "fast-moving water").
+ * Voice transcripts have no punctuation at all, so the patterns below are also written to be
+ * safe without the marker.
+ */
+export function normalizeForScan(input: unknown): string {
+  if (typeof input !== "string") return "";
+  return input
+    .slice(0, MAX_SCAN_CHARS)
+    .toLowerCase()
+    .replace(/['‘’ʼ]/gu, "")
+    .replace(/[.,;:!?\n\r]+/gu, " | ")
+    .replace(/[^\p{L}\p{N}\s|]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+/** Same alternation as `re`, global, for stripping phrases before a cross-check. */
+function reAll(alternatives: string): RegExp {
+  return new RegExp(`\\b(?:${alternatives})\\b`, "g");
+}
+
+/** Places that are indoors: water in any of these means water around wiring and sockets. */
+const INDOOR =
+  "(?:basement|cellar|house|home|room|rooms|kitchen|bedroom|bathroom|hall|flat|apartment|shop|office|garage|godown|hostel|building|ground floor|first floor)";
+
+/** Anything wet. Manglish: vellam = water, vellapokkam = flood. */
+const WATER = re(
+  "water|waters|flood|flooded|flooding|floods|waterlogged|submerged|wet|damp|leak|leaks|leaking|leakage|rainwater|vellam|vellom|vellapokkam|vellappokkam",
+);
+
+/**
+ * Anything electrical. "current" is the Indian-English word for electricity, but in a flood it
+ * also means the pull of the water, so it only counts when it is not "strong current" /
+ * "water current" / "current is strong". "meter" does not count after a number ("2 meter deep").
+ */
+const ELECTRICAL = re(
+  [
+    "switch|switches|switchboard|socket|sockets|plug|plugs|plug point|wire|wires|wiring|cable|cables",
+    "power(?! bank| banks)|inverter|fuse|breaker|mcb|transformer|electric|electrical|electricity|kambi", // kambi = wire
+    "(?<!\\d )(?<!\\d)meter",
+    "(?<!strong )(?<!fast )(?<!heavy )(?<!water )(?<!river )(?<!rivers )current(?! is (?:strong|fast|heavy|too)| too strong)",
+  ].join("|"),
+);
+
+/** "No drinking water and no power" is a supplies request, not water near electricity. */
+const NOT_A_WET_SCENE = reAll(
+  [
+    "drinking water|water to drink|water bottle|water bottles|water supply|no water",
+    "power cut|power cuts|power outage|power failure|no power|no current|no electricity|without power|without electricity",
+    "current illa|current poyi|(?:power|electricity|current) (?:is |has )?(?:gone|out|off)", // current illa = no electricity
+  ].join("|"),
+);
+
+/** Live-electricity dangers that need no water at all. */
+const LIVE_ELECTRICITY = re(
+  [
+    "live wire|live wires|live line|short circuit|electric shock|electrocuted|electrocution",
+    "sparks|sparking|got (?:a |an )?(?:electric )?shock|current adichu|shock adichu|current kayari", // adichu = got hit
+    "(?:wire|wires|line|cable) (?:is |are |has |have )?(?:down|fallen|hanging|broken|snapped)",
+    "(?:fallen|snapped|broken|hanging) (?:electric |power )?(?:wire|wires|line|lines|cable|pole)",
+  ].join("|"),
+);
+
+const INDOOR_FLOODING = re(
+  [
+    `${INDOOR} (?:\\w+ ){0,2}(?:flooded|flooding|waterlogged|submerged|under water|underwater)`,
+    `(?:flooded|flooding|waterlogged|submerged) (?:\\w+ ){0,1}${INDOOR}`,
+    `water (?:\\w+ ){0,3}(?:inside|in|into|entered|entering|filled|filling) (?:the |my |our |their )?${INDOOR}`,
+    `${INDOOR} (?:\\w+ ){0,2}(?:full of|filled with|filling with) water`,
+    "standing water|stagnant water|water on the floor|wet floor|water inside",
+    "vellam keri|vellam kayari", // water came in
+  ].join("|"),
+);
+
+/** Words allowed between a structure and its verb: "the wall HAS JUST collapsed", never "house FATHER collapsed". */
+const AUX = "(?:(?:has|have|had|is|are|was|were|just|partly|partially|completely|fully|may|might|will|could|about|going|to|be|been) ){0,3}";
+const STRUCTURE = "(?:building|buildings|house|wall|walls|roof|ceiling|pillar|pillars|beam|slab|bridge|balcony|foundation|compound wall|structure)";
+/** No "house": "in my house father fell" is a fall, not a collapse. */
+const STRUCTURE_PART = "(?:building|wall|walls|roof|ceiling|pillar|pillars|beam|slab|bridge|balcony|compound wall|structure)";
+const VEHICLE = "(?:car|bike|bus|lorry|truck|vehicle|scooter|auto|autorickshaw|jeep|van|motorcycle|tempo|tipper)";
+
+/**
+ * Ordered hazard table: the FIRST kind whose pattern matches wins, so the order is a deliberate,
+ * reviewable safety decision:
+ *   1. fire_smoke before gas_leak — once something is burning, "get out, close doors" must not be
+ *      replaced by the gas-leak advice to open doors and windows.
+ *   2. gas_leak, then electrocution — the two hazards people cannot see.
+ *   3. electrocution before fast_water — a flooded room with the power on is the hidden killer;
+ *      moving water outside is at least visible.
+ *   4. contaminated_water last — it is the only one that is not immediately life-threatening.
+ * A PERSON collapsing is a medical emergency, never structural_collapse: "collapsed" only counts
+ * right after a structure ("wall has collapsed") or as "the/under/in … collapsed building".
+ */
+const HAZARD_RULES: { kind: Exclude<HazardKind, "none" | "other">; patterns: RegExp[] }[] = [
+  {
+    kind: "fire_smoke",
+    patterns: [
+      re("(?<!no )(?<!not on )(?:fire|fires)(?! force| station| engine| brigade| service| department)"),
+      re("smoke|smoky|flames|flame|blaze|ablaze|explosion|exploded|blast"),
+      re("burning(?! sensation| pain| feeling)|caught fire"),
+      re("thee|theeyanu|theepiduthu|theepiduttham|thee pidichu|kathunnu|puka"), // thee = fire, puka = smoke
+    ],
+  },
+  {
+    kind: "gas_leak",
+    patterns: [
+      re("lpg"),
+      re("gas smell|smell(?:s|ing|ed)? (?:of |like )?(?:cooking |lpg )?gas|smell (?:\\w+ ){1,2}gas"),
+      re("gas (?:is |was |has )?(?:leak|leaks|leaking|leakage|leaked)|leaking gas|leak of gas"),
+      re("cylinder (?:is |was |has )?(?:leak|leaks|leaking|leakage|leaked)|gas cylinder (?:\\w+ ){0,2}leak\\w*"),
+    ],
+  },
+  { kind: "electrocution", patterns: [INDOOR_FLOODING, LIVE_ELECTRICITY] }, // plus WATER × ELECTRICAL, see hazardOfScan
+  {
+    kind: "fast_water",
+    patterns: [
+      re("water (?:is |level |levels )?(?:rising|raising|increasing|rose)|rising (?:flood )?water|rising (?:fast|quickly|rapidly)"),
+      re("(?:fast|strong|heavy|swift) (?:moving |flowing )?(?:water|current|currents|flow)|water current|river current|current is (?:strong|fast|heavy|too)"),
+      // A river named as a landmark ("near the river bridge") is not a hazard. puzha = river.
+      re("(?<!near )(?<!near the )(?<!by the )(?<!beside the )(?:river|rivers|canal|dam|puzha)(?! side| bridge| road| view)"),
+      re("swept|washed away|carried away|flash flood|flash floods"),
+    ],
+  },
+  {
+    kind: "structural_collapse",
+    patterns: [
+      re(`${STRUCTURE} ${AUX}(?:collapse|collapsed|collapsing|caved in|giving way|tilting|leaning|sinking|crack|cracks|cracked|cracking)`),
+      re(`${STRUCTURE_PART} ${AUX}(?:fell|fallen|came down)`),
+      new RegExp(`(?:^|\\| |\\b(?:the|a|an|under|in|inside|from|of|partially|partly|half|fully) )(?:collapsed|collapsing) ${STRUCTURE}\\b`),
+      re(`(?:fallen|damaged|cracked) ${STRUCTURE_PART}`),
+      re(`(?:crack|cracks) (?:\\w+ ){0,3}(?:${STRUCTURE}|floor|ground|road)|(?:big|large|huge|new|wide|deep|long) (?:crack|cracks)|(?:crack|cracks) (?:is |are )?(?:appearing|widening|growing|spreading|developing)`),
+      re("landslide|landslides|landslip|mudslide|rubble|debris|caved in|mannidichil|urulpottal|mannu idinju|veedu idinju"), // landslide / house collapsed
+    ],
+  },
+  {
+    kind: "chemical",
+    patterns: [re("acid|chemical|chemicals|fumes|pesticide|pesticides|insecticide|ammonia|chlorine|toxic")],
+  },
+  {
+    kind: "traffic",
+    patterns: [
+      re(`(?:road|highway|bypass|traffic|${VEHICLE}) accident|met with (?:an )?accident`),
+      re("accident (?:\\w+ ){0,3}(?:road|highway|bypass|junction|nh)"),
+      re(`${VEHICLE} (?:\\w+ ){0,2}(?:hit|crash|crashed|collided|collision|overturned|skidded|ran over)`),
+      re(`hit by (?:a |an |the )?${VEHICLE}|hit and run|run over|knocked down by`),
+    ],
+  },
+  {
+    kind: "animal",
+    patterns: [
+      re("snake|snakes|snakebite|cobra|viper|krait|paambu|pambu|pamb|paamb"),
+      re("(?:stray|street|mad|rabid|wild) dogs?|dogs? (?:bite|bit|bitten|attack|attacked|attacking|chasing|chased)|(?:bitten|attacked|chased) by (?:a |the )?dogs?|pack of dogs"),
+      re("bee|bees|beehive|wasp|wasps|hornet|hornets|kadannal"), // kadannal = wasp
+      re("elephant|elephants|kaattana|wild boar|leopard|tiger|crocodile"),
+    ],
+  },
+  {
+    kind: "contaminated_water",
+    patterns: [
+      re("sewage|sewer|septic|manhole|contaminated"),
+      re("(?:drain|drains|drainage|gutter) (?:is |are |has |have )?(?:overflow|overflowing|overflowed|overflown|blocked|water)|overflowing (?:drain|drains|drainage|gutter)"),
+      re("dirty (?:flood )?water|(?:flood )?water (?:is )?(?:dirty|black|stinking|smelly|contaminated)"),
+    ],
+  },
+];
+
+/** Hazard of a normalizeForScan() string. */
+function hazardOfScan(scan: string): HazardKind {
+  if (scan.length === 0) return "none";
+  for (const { kind, patterns } of HAZARD_RULES) {
+    if (patterns.some((p) => p.test(scan))) return kind;
+    if (kind === "electrocution") {
+      // Water anywhere near electricity: "rain water is dripping on the switchboard".
+      const wet = scan.replace(NOT_A_WET_SCENE, " ");
+      if (WATER.test(wet) && ELECTRICAL.test(wet)) return kind;
+    }
+  }
+  return "none";
+}
+
+/**
+ * Keyword hazard classifier (docs/UPGRADE.md §2). Pure, synchronous, never throws; "none" when
+ * nothing fires. It never returns "other": that kind exists only for a model that reports a
+ * hazard it cannot name. The words shown to the user come from lib/hazards.ts, never from here.
+ */
+export function detectHazardByRules(text: string): HazardKind {
+  try {
+    return hazardOfScan(normalizeForScan(text));
+  } catch {
+    return "none";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Equipment the situation specifically calls for (docs/UPGRADE.md §5)
+// ---------------------------------------------------------------------------
+
+/** Most equipment a request may ask for; keeps capabilityMatch's denominator honest. */
+export const MAX_EQUIPMENT = 4;
+
+/** A vehicle that is part of the accident ("car hit a tree") is not a request for transport. */
+const NOT_THE_CASUALTY =
+  "(?! accident| crash| crashed| hit| collided| overturned| skidded| fell| is stuck| stuck| sinking| sank| submerged| on fire| caught fire)";
+
+/** "Trapped in the car", "wall fell on my car", "hit by a car": a car that is already in the story, not one to send. */
+const NOT_SOMEONES = ["by", "on", "in", "under", "inside", "from"]
+  .flatMap((prep) => [`(?<!${prep} a )`, `(?<!${prep} the )`])
+  .concat(["(?<!my )", "(?<!his )", "(?<!her )", "(?<!our )", "(?<!their )"])
+  .join("");
+
+/** Checked in this order; the first MAX_EQUIPMENT hits are kept. */
+const EQUIPMENT_RULES: { item: Equipment; pattern: RegExp }[] = [
+  { item: "water_pump", pattern: re("(?<!petrol )(?<!diesel )(?<!fuel )(?:pump|pumps|pumpset|motor pump|dewatering)") }, // "near the petrol pump" is a landmark
+  { item: "oxygen_cylinder", pattern: re("oxygen|o2") },
+  { item: "stretcher_wheelchair", pattern: re("stretcher|stretchers|wheelchair|wheelchairs|wheel chair") },
+  { item: "life_jacket", pattern: re("life jacket|life jackets|lifejacket|lifejackets|life vest|life vests|lifebuoy|life buoy|life ring") },
+  { item: "rope_ladder", pattern: re("rope|ropes|(?<!from )(?<!from a )(?<!from the )(?<!off )(?<!off a )(?<!off the )(?:ladder|ladders)") }, // "fell from a ladder" needs a nurse, not a ladder
+  { item: "chainsaw_cutter", pattern: re("chainsaw|chain saw|cutter|cutters|fallen tree|fallen trees|uprooted|tree (?:has |is |had |just )?(?:fell|fallen|came down)|tree (?:\\w+ ){0,2}blocking") },
+  { item: "fire_extinguisher", pattern: re("extinguisher|extinguishers") },
+  { item: "first_aid_kit", pattern: re("first aid (?:kit|box)|firstaid (?:kit|box)|medical kit|med kit|bandage|bandages|gauze|dressing") },
+  { item: "torch_powerbank", pattern: re("torch|torches|flashlight|emergency light|power bank|power banks|powerbank|low battery|battery (?:is )?(?:dying|dead|low)") },
+  {
+    item: "car",
+    pattern: re(
+      `${NOT_SOMEONES}(?:car|cars|vehicle|vehicles|taxi|jeep)${NOT_THE_CASUALTY}|transport|transportation|ambulance`,
+    ),
+  },
+];
+
+function equipmentOfScan(scan: string): Equipment[] {
+  const out: Equipment[] = [];
+  if (scan.length === 0) return out;
+  for (const { item, pattern } of EQUIPMENT_RULES) {
+    if (out.length >= MAX_EQUIPMENT) break;
+    if (pattern.test(scan)) out.push(item);
+  }
+  return out;
+}
+
+/**
+ * Equipment named in the text ("need a pump" → water_pump). Pure, synchronous, never throws.
+ * Only what the message asks for — the per-type defaults live in TYPE_EQUIPMENT (lib/taxonomy.ts).
+ */
+export function detectEquipmentByRules(text: string): Equipment[] {
+  try {
+    return equipmentOfScan(normalizeForScan(text));
+  } catch {
+    return [];
+  }
+}
+
 type Score = { total: number; phrase: boolean };
 
 function scoreType(text: string, rules: Rule[]): Score {
@@ -346,7 +609,7 @@ function summaryFor(type: NeedType, cleaned: string): string {
   return `${label}: ${excerpt}`;
 }
 
-function build(type: NeedType, urgency: Urgency, confidence: number, cleaned: string): TriageResult {
+function build(type: NeedType, urgency: Urgency, confidence: number, cleaned: string, raw: string): TriageResult {
   return {
     type,
     urgency,
@@ -355,14 +618,14 @@ function build(type: NeedType, urgency: Urgency, confidence: number, cleaned: st
     confidence,
     source: "rules",
     clarifyingQuestion: confidence < CLARIFY_BELOW ? CLARIFYING_QUESTION : null,
-    equipment: [],
-    hazardAlert: NO_HAZARD,
+    equipment: detectEquipmentByRules(raw),
+    hazardAlert: hazardAlertFor(detectHazardByRules(raw)),
   };
 }
 
-function noHit(cleaned: string): TriageResult {
+function noHit(cleaned: string, raw: string): TriageResult {
   // Unreadable plea: still dispatch generalists fast and ask the one fixed question.
-  return build("other", "high", NO_HIT_CONFIDENCE, cleaned);
+  return build("other", "high", NO_HIT_CONFIDENCE, cleaned, raw);
 }
 
 /**
@@ -373,7 +636,7 @@ export function triageByRules(text: string): TriageResult {
   let cleaned = "";
   try {
     cleaned = normalizeText(text);
-    if (cleaned.length === 0) return noHit(cleaned);
+    if (cleaned.length === 0) return noHit(cleaned, text);
 
     const scores = {} as Record<NeedType, Score>;
     for (const t of NEED_TYPES) scores[t] = scoreType(cleaned, RULES[t]);
@@ -381,7 +644,7 @@ export function triageByRules(text: string): TriageResult {
     let type = pickType(scores);
     if (type === null) {
       // No keyword hit; a critical phrase alone (unlikely, they are all keywords too) still lifts urgency.
-      const r = noHit(cleaned);
+      const r = noHit(cleaned, text);
       return CRITICAL.test(cleaned) ? { ...r, urgency: "critical" } : r;
     }
 
@@ -395,9 +658,9 @@ export function triageByRules(text: string): TriageResult {
     }
 
     const urgency: Urgency = CRITICAL.test(cleaned) ? "critical" : TYPE_DEFAULT_URGENCY[type];
-    return build(type, urgency, confidenceFor(scores[type]), cleaned);
+    return build(type, urgency, confidenceFor(scores[type]), cleaned, text);
   } catch {
     // Defensive only: nothing above should throw, but the fallback must never fail the request.
-    return noHit(cleaned);
+    return noHit(cleaned, text);
   }
 }

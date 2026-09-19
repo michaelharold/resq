@@ -4,10 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
 import { Badge, Logo, PulsingDot } from "@/components/ui";
 import { SKILL_META, SkillPill, URGENCY_STYLE } from "@/components/skills";
+import { EquipmentPill } from "@/components/equipment";
+import { TIER_META, TrustBadge } from "@/components/TrustBadge";
 import { LiveMap, type MapArea, type MapMarker } from "@/components/LiveMap";
 import { api, fmtDistance, fmtTime } from "@/lib/client/api";
 import { useSnapshot } from "@/lib/client/sse";
 import { SKILLS, TYPE_LABELS } from "@/lib/taxonomy";
+import { GIG_TYPES, TRUST_TIERS, categoryOf, feeOf, formatMoney, tierOf } from "@/lib/policy";
 import type { AuditEntry, HelpRequest, LatLng, OpsView, Zone, ZoneKind } from "@/lib/types";
 
 type SmsLog = { to: string; body: string; at: string; simulated: boolean; ok: boolean };
@@ -71,9 +74,10 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   const open = data.requests.filter((r) => r.status !== "escalated");
   const coverage = SKILLS.map((s) => ({ s, n: onDuty.filter((h) => h.skills.includes(s)).length }));
   const maxCov = Math.max(1, ...coverage.map((c) => c.n));
+  const byTier = TRUST_TIERS.map((tier) => ({ tier, n: onDuty.filter((h) => tierOf(h) === tier).length }));
   const markers: MapMarker[] = [
     ...data.helpers.filter((h) => h.location).map((h) => ({
-      id: h.id, at: h.location!, kind: "helper" as const, label: `${h.name} · ${h.skills.map((s) => SKILL_META[s].label).join(", ")}`,
+      id: h.id, at: h.location!, kind: "helper" as const, label: `${h.name} · ${TIER_META[tierOf(h)].label} · ${h.skills.map((s) => SKILL_META[s].label).join(", ")}`,
       color: h.onDuty ? SKILL_META[h.skills[0]].color : "#CBD5E1",
       ring: data.requests.some((r) => r.matchedHelperId === h.id && r.status === "matched") ? "#16A34A"
         : data.dispatches.some((d) => d.helperId === h.id && d.status === "pinged") ? "#D97706" : undefined,
@@ -147,6 +151,18 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
                 </div>
               ))}
             </div>
+            <div className="mt-4 border-t border-slate-100 pt-3">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-resq-slate">Helpers by badge (on duty)</h3>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {byTier.map(({ tier, n }) => (
+                  <div key={tier} title={TIER_META[tier].desc} className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 px-3 py-2">
+                    <TrustBadge tier={tier} />
+                    <span className={`font-mono text-lg font-bold ${n === 0 ? "text-resq-red" : "text-resq-navy"}`}>{n}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-resq-slate">Paid household jobs only ping Certified Pros. Critical life-safety requests rank First Responders first in wave 1.</p>
+            </div>
           </div>
         </section>
 
@@ -169,12 +185,13 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               <div className="mb-2 flex items-center justify-between"><h2 className="font-display font-semibold text-resq-navy">Dispatches</h2><button onClick={() => setSelected(null)} className="h-10 w-10" aria-label="Close"><Icon.X size={16} /></button></div>
               <p className="mb-3 text-sm text-resq-navy">“{sel.description}”</p>
               <table className="w-full text-left text-xs">
-                <thead className="text-resq-slate"><tr><th className="py-1">Wave</th><th>Helper</th><th>Dist</th><th>Score</th><th>Status</th></tr></thead>
+                <thead className="text-resq-slate"><tr><th className="py-1">Wave</th><th>Helper</th><th>Tier</th><th>Dist</th><th>Score</th><th>Status</th></tr></thead>
                 <tbody>
                   {data.dispatches.filter((d) => d.requestId === sel.id).map((d) => (
                     <tr key={d.id} className="border-t border-slate-100">
                       <td className="py-1.5 font-mono">{d.wave}</td>
                       <td>{helperById.get(d.helperId)?.name ?? d.helperId}</td>
+                      <td><TrustBadge tier={tierOf(helperById.get(d.helperId))} compact /></td>
                       <td>{fmtDistance(d.distanceKm)}</td>
                       <td className="font-mono">{d.score.toFixed(2)}</td>
                       <td><span className="font-semibold">{d.status}</span>{d.channel === "sms" && <span className="ml-1 rounded bg-amber-100 px-1 text-amber-800">SMS</span>}</td>
@@ -203,6 +220,10 @@ function RequestRow({ r, data, onSelect, selected }: { r: HelpRequest; data: Ops
         {r.triage && <span className={`rounded px-1.5 text-[10px] font-bold uppercase ${URGENCY_STYLE[r.triage.urgency]}`}>{r.triage.urgency}</span>}
         {r.channel === "sms" && <Badge variant="warning">SMS-in</Badge>}
         {!r.location && <Badge variant="emergency">No location</Badge>}
+        <CategoryChip r={r} />
+        {r.upgradedToLifeSafety && <Badge variant="emergency">Upgraded to emergency</Badge>}
+        {r.triage?.hazardAlert?.hasHazard && <Badge variant="warning"><Icon.AlertTriangle size={11} />Hazard: {r.triage.hazardAlert.kind.replace(/_/g, " ")}</Badge>}
+        {r.emergencyContactNotifiedAt && <Badge variant="ai">Emergency contact texted</Badge>}
         <span className="ml-auto font-mono text-xs text-resq-slate">{fmtTime(r.createdAt)}</span>
       </div>
       <p className="mt-1 line-clamp-2 text-xs text-resq-slate">{r.description}</p>
@@ -214,8 +235,20 @@ function RequestRow({ r, data, onSelect, selected }: { r: HelpRequest; data: Ops
         {r.requesterPhone && <a href={`tel:${r.requesterPhone}`} onClick={(e) => e.stopPropagation()} className="font-semibold text-resq-cyan">· call {r.requesterPhone}</a>}
         {helper && <span>· helper {helper.name}</span>}
       </div>
-      {r.triage && <div className="mt-1.5 flex flex-wrap gap-1">{r.triage.skills.map((s) => <SkillPill key={s} skill={s} />)}</div>}
+      {r.triage && <div className="mt-1.5 flex flex-wrap gap-1">{r.triage.skills.map((s) => <SkillPill key={s} skill={s} />)}{(r.triage.equipment ?? []).map((e) => <EquipmentPill key={e} item={e} />)}</div>}
     </button>
+  );
+}
+
+/** "FREE · life safety" or "Paid · ₹500 · HELD|RELEASED|REFUNDED" (older records without a category are life-safety). */
+function CategoryChip({ r }: { r: HelpRequest }) {
+  if (categoryOf(r) === "LIFE_SAFETY") return <Badge variant="success">FREE · life safety</Badge>;
+  const state = r.escrowStatus ?? "HELD";
+  const cls = state === "RELEASED" ? "bg-resq-green-light text-resq-green" : state === "REFUNDED" ? "bg-slate-100 text-slate-600" : "bg-blue-50 text-blue-700";
+  return (
+    <span title={r.gigType ? GIG_TYPES[r.gigType].label : undefined} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
+      Paid · {formatMoney(feeOf(r))} · {state}
+    </span>
   );
 }
 

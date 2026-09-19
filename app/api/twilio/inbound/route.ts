@@ -38,7 +38,8 @@ export async function POST(req: Request) {
       if (!d) return reply("RESQ: No open request for you right now.");
       const r = await accept(d.id, "sms");
       if (r.ok) return reply(`RESQ: You're matched. Map: ${r.mapsUrl ?? "location unknown"}. Call the requester: ${r.requesterPhone ?? "via app"}.`);
-      return reply(r.reason === "already_matched" ? "RESQ: Sorry, that request was already taken."
+      return reply(r.reason === "tier_required" ? "RESQ: That job needs a Certified Pro badge."
+        : r.reason === "already_matched" ? "RESQ: Sorry, that request was already taken."
         : r.reason === "expired" ? "RESQ: Sorry, that request has expired." : "RESQ: No open request for you right now.");
     }
     if (cmd === "help") {

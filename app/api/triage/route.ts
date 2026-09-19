@@ -1,6 +1,12 @@
 /**
  * POST /api/triage  { text } → TriageResult   (README §11 M1; preview only, CONTRACTS §6)
+ *   Upgrade (docs/UPGRADE.md §2, §5): the result also carries
+ *   `equipment: Equipment[]` (max 4) and `hazardAlert: { hasHazard, kind, hazardTitle, hazardAction }`.
+ *   The banner text is curated (lib/hazards.ts) — the model only classifies the kind, and the
+ *   keyword rules in lib/triage-rules.ts overrule it whenever they fire. Ollama is called only
+ *   here and from POST /api/requests, never from the browser; the 4 s timeout falls back to rules.
  * GET  /api/triage  → warm-up / health        (CONTRACTS §6: { ollama, model, ms, modelPresent })
+ *   The warm-up now sends the real system prompt so Ollama caches that prefix (see lib/triage.ts).
  */
 import { NextResponse } from "next/server";
 import { triage, warmOllama } from "@/lib/triage";

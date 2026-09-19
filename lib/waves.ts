@@ -8,10 +8,17 @@ import { randomUUID } from "node:crypto";
 import { emit } from "./events";
 import { getStore } from "./store";
 import { MAX_WAVES, TICK_GRACE_MS, WAVE_RADII_KM, haversineKm, selectWave, waveWindowMs } from "./dispatch";
-import { mapsUrl, sendSms, tplPing, tplRequesterEscalated, tplRequesterMatched } from "./sms";
+import { formatDistance, mapsUrl, sendSms, tplPing, tplRequesterEscalated, tplRequesterMatched } from "./sms";
 import { triage } from "./triage";
 import { inferRole } from "./role";
-import type { Channel, Dispatch, Helper, HelpRequest, LatLng, LocationSource, RequesterRole, StoreErrorReason, UserProfile } from "./types";
+import { releaseEscrowLocked, withHelperLock, type EscrowRelease } from "./escrow";
+import { GIG_TYPES, REQUIRED_TIER_FOR_GIG, canAccept, categoryOf, fallbackMs, feeOf, isCalloutFee, mustBeLifeSafety } from "./policy";
+import { isKnownGigType } from "./validate";
+import { EQUIPMENT_LABELS, SKILL_LABELS, TYPE_SMS_LABELS } from "./taxonomy";
+import type {
+  Channel, Dispatch, Equipment, GigType, Helper, HelpRequest, LatLng, LocationSource, NeedType, RequestCategory, RequesterRole,
+  StoreErrorReason, TriageResult, Urgency, UserProfile,
+} from "./types";
 
 const g = globalThis as unknown as { __resq_locks?: Map<string, Promise<unknown>> };
 const locks = (g.__resq_locks ??= new Map());
@@ -28,15 +35,73 @@ export function withRequestLock<T>(requestId: string, fn: () => Promise<T>): Pro
 const nowIso = () => new Date().toISOString();
 /** Clock-skew tolerance for tick(): 1 s, but never more than a tenth of the window. */
 const grace = () => Math.min(TICK_GRACE_MS, waveWindowMs() / 10);
+/** Same tolerance for the 3-minute fallback deadline (the requester's screen schedules a tick exactly at the deadline). */
+const fallbackGrace = () => Math.min(TICK_GRACE_MS, fallbackMs() / 10);
+/** LIFE_SAFETY only: true once the request has been open for fallbackMs() (180 s by default), measured from createdAt. */
+function fallbackDue(r: HelpRequest, nowMs = Date.now()): boolean {
+  if (categoryOf(r) !== "LIFE_SAFETY") return false;
+  const created = Date.parse(r.createdAt);
+  return Number.isFinite(created) && nowMs - created >= fallbackMs() - fallbackGrace();
+}
+
+// ── SMS wording owned by dispatch (kept here: lib/sms.ts only knows skill pings) ────────────────────────────────
+const SMS_MAX = 160;
+const expiresIn = () => `Expires in ${Math.round(waveWindowMs() / 1000)} s.`;
+/** Ping for someone matched on what they OWN, not on a skill. */
+const tplPingEquipment = (i: { distanceKm: number; equipment: Equipment; type: NeedType; urgency: Urgency }) =>
+  `RESQ: person ${formatDistance(i.distanceKm)} away needs your ${EQUIPMENT_LABELS[i.equipment].toUpperCase()} (${TYPE_SMS_LABELS[i.type]}, ${i.urgency}). Reply YES to accept, NO to skip. ${expiresIn()}`;
+/** Ping for a paid household job ("Rs", not the rupee sign, so the SMS stays one GSM-7 segment). */
+const tplPingGig = (i: { distanceKm: number; label: string; fee: number }) =>
+  `RESQ: paid job ${formatDistance(i.distanceKm)} away needs a ${i.label.toUpperCase()} (Rs ${i.fee} callout, held in escrow). Reply YES to accept, NO to skip. ${expiresIn()}`;
+
+/**
+ * Text for the requester's emergency contact when the fallback fires (docs/UPGRADE.md §6). The contract wording is
+ * used when it fits in one 160-character SMS; with a maps link it usually does not, so a compact wording with the
+ * same facts is used instead, and the name is shortened as a last resort. Never longer than 160 characters.
+ */
+export function tplEmergencyContact(i: { name: string | null; type: NeedType; location: LatLng | null }): string {
+  const type = TYPE_SMS_LABELS[i.type];
+  const where = i.location ? mapsUrl(i.location) : "not shared";
+  const full = (n: string) => `RESQ: ${n} asked for emergency help (${type}) and no local helper has responded. Location: ${where}. Please call them or 112.`;
+  const compact = (n: string) => `RESQ: ${n} asked for emergency help (${type}). No local helper has responded. Location: ${where} Call them or 112.`;
+  const name = (i.name ?? "").trim() || "Your contact";
+  if (full(name).length <= SMS_MAX) return full(name);
+  if (compact(name).length <= SMS_MAX) return compact(name);
+  const first = name.split(/\s+/)[0];
+  if (compact(first).length <= SMS_MAX) return compact(first);
+  const room = Math.max(1, first.length - (compact(first).length - SMS_MAX));
+  return compact(first.slice(0, room)).slice(0, SMS_MAX);
+}
 
 // ── internal transitions (call only while holding the lock) ─────────────────────────────────────────────────────
 
+/**
+ * Nobody accepted (all 4 waves done, no location, or the 3-minute LIFE_SAFETY deadline): hand over to the coordinator.
+ * For a life-safety request this is the "smart fallback": fallbackAt is stamped (the requester's screen shows the
+ * call-112 modal) and the requester's emergency contact is texted exactly once. Exactly-once holds because this runs
+ * under the request lock and emergencyContactNotifiedAt is persisted here; it is only set when the SMS went out
+ * (or was simulated), so the screen never claims a text that failed.
+ */
 async function escalateLocked(id: string): Promise<HelpRequest | null> {
   const store = getStore();
-  const r = await store.updateRequest(id, { status: "escalated", waveStartedAt: null });
-  if (!r) return null;
+  const before = await store.getRequest(id);
+  if (!before) return null;
+  const lifeSafety = categoryOf(before) === "LIFE_SAFETY";
+  const first = before.status !== "escalated";
+  let r = (await store.updateRequest(id, {
+    status: "escalated", waveStartedAt: null,
+    ...(lifeSafety && !before.fallbackAt ? { fallbackAt: nowIso() } : {}),
+  })) as HelpRequest;
   emit("request:updated", { request: r });
-  if (r.channel === "sms" && r.requesterPhone) void sendSms(r.requesterPhone, tplRequesterEscalated());
+  if (first && r.channel === "sms" && r.requesterPhone) void sendSms(r.requesterPhone, tplRequesterEscalated());
+  const contact = r.requesterProfile?.emergencyContactPhone ?? null;
+  if (lifeSafety && contact && !r.emergencyContactNotifiedAt) {
+    const sent = await sendSms(contact, tplEmergencyContact({ name: r.requesterName, type: r.triage?.type ?? "other", location: r.location }));
+    if (sent.ok) {
+      r = (await store.updateRequest(id, { emergencyContactNotifiedAt: nowIso() })) as HelpRequest;
+      emit("request:updated", { request: r });
+    }
+  }
   return r;
 }
 
@@ -51,7 +116,16 @@ async function runWaveLocked(id: string, first: number): Promise<HelpRequest | n
     const existing = await store.listDispatches(id);
     const exclude = new Set(existing.map((d) => d.helperId));
     if (request.requesterHelperId) exclude.add(request.requesterHelperId);
-    const picks = selectWave({ request, helpers: await store.getOnDutyHelpers(), radiusKm, excludeHelperIds: exclude, now });
+    const t0 = request.triage;
+    const gig = categoryOf(request) === "HOUSEHOLD_MICROGIG";
+    const neededEquipment = t0?.equipment ?? [];
+    const picks = selectWave({
+      request, helpers: await store.getOnDutyHelpers(), radiusKm, excludeHelperIds: exclude, now, neededEquipment,
+      // Wave 1 of a critical life-safety request goes to verified first responders first (docs/UPGRADE.md §3).
+      prioritizeTier3: !gig && t0?.urgency === "critical" && n === 1,
+      // Paid household jobs: only Certified Pros with the trade skill, never a bystander fill.
+      ...(gig ? { strict: true, requireTier: REQUIRED_TIER_FOR_GIG } : {}),
+    });
     if (picks.length === 0) continue; // nobody to wait for → widen immediately
     const ds: Dispatch[] = picks.map((p) => ({
       id: randomUUID(), requestId: id, helperId: p.helper.id, wave: n, score: +p.score.toFixed(4),
@@ -63,8 +137,12 @@ async function runWaveLocked(id: string, first: number): Promise<HelpRequest | n
     const t = request.triage;
     if (t) {
       for (const p of picks) {
-        const skill = t.skills.find((s) => p.helper.skills.includes(s)) ?? t.skills[0];
-        void sendSms(p.helper.phone, tplPing({ distanceKm: p.distanceKm, skill, type: t.type, urgency: t.urgency }));
+        const mySkill = t.skills.find((s) => p.helper.skills.includes(s));
+        const myEquipment = neededEquipment.find((e) => (p.helper.equipment ?? []).includes(e));
+        const body = gig ? tplPingGig({ distanceKm: p.distanceKm, label: SKILL_LABELS[mySkill ?? t.skills[0]], fee: feeOf(request) })
+          : !mySkill && myEquipment ? tplPingEquipment({ distanceKm: p.distanceKm, equipment: myEquipment, type: t.type, urgency: t.urgency })
+          : tplPing({ distanceKm: p.distanceKm, skill: mySkill ?? t.skills[0], type: t.type, urgency: t.urgency });
+        void sendSms(p.helper.phone, body);
       }
     }
     return request;
@@ -89,13 +167,31 @@ export type NewRequestInput = {
   location: LatLng | null; locationSource: LocationSource; landmark: string | null; channel: Channel; role?: RequesterRole;
   requesterName?: string | null;
   requesterProfile?: UserProfile | null;
+  category?: RequestCategory; // default LIFE_SAFETY (always free)
+  gigType?: GigType | null;   // required for HOUSEHOLD_MICROGIG
+  calloutFee?: number;        // one of CALLOUT_FEES for HOUSEHOLD_MICROGIG; ignored (0) for LIFE_SAFETY
 };
+
+const URGENCY_ORDER: Urgency[] = ["critical", "high", "medium", "low"];
+/** A paid household job is never dispatched as an emergency: critical/high are capped at "medium". */
+const capUrgency = (u: Urgency): Urgency => (URGENCY_ORDER.indexOf(u) < URGENCY_ORDER.indexOf("medium") ? "medium" : u);
+
+/** Micro-gig rules (docs/UPGRADE.md §1): the trade decides who is pinged, not the free-text classification. */
+function gigTriage(t: TriageResult, gigType: GigType): TriageResult {
+  const gig = GIG_TYPES[gigType];
+  return { ...t, skills: [...gig.skills], equipment: [...new Set([...gig.equipment, ...(t.equipment ?? [])])].slice(0, 4), urgency: capUrgency(t.urgency) };
+}
 
 export async function createHelpRequest(input: NewRequestInput): Promise<HelpRequest> {
   const store = getStore();
   const now = nowIso();
+  // A request only becomes a paid micro-gig when the trade AND the fee are valid (the route rejects anything else with
+  // 400). Any other caller input falls back to a free life-safety request: a cry for help is never dropped over money.
+  const gigType = input.category === "HOUSEHOLD_MICROGIG" && isKnownGigType(input.gigType) && isCalloutFee(input.calloutFee) ? input.gigType : null;
   const created = await store.createRequest({
     id: randomUUID(), ...input, requesterName: input.requesterName ?? null, requesterProfile: input.requesterProfile ?? null, role: input.role ?? inferRole(input.description), triage: null, status: "triaging", wave: 0, radiusKm: 0, waveStartedAt: null,
+    category: gigType ? "HOUSEHOLD_MICROGIG" : "LIFE_SAFETY", gigType, calloutFee: gigType ? (input.calloutFee as number) : 0,
+    escrowStatus: gigType ? "HELD" : null, upgradedToLifeSafety: false, fallbackAt: null, emergencyContactNotifiedAt: null,
     matchedHelperId: null, createdAt: now, updatedAt: now,
   });
   emit("request:updated", { request: created });
@@ -103,8 +199,14 @@ export async function createHelpRequest(input: NewRequestInput): Promise<HelpReq
     await store.recordLocation({ phone: input.requesterPhone, name: input.requesterName ?? null, helperId: input.requesterHelperId,
       location: input.location, accuracyM: null, source: "request", updatedAt: now });
   }
-  const t = await triage(input.description);
-  const withTriage = (await store.updateRequest(created.id, { triage: t })) as HelpRequest;
+  const raw = await triage(input.description);
+  // Safety override: a "paid job" that is really an emergency becomes a FREE life-safety request and the fee is refunded.
+  const upgrade = gigType !== null && mustBeLifeSafety(raw, input.description);
+  const t = gigType && !upgrade ? gigTriage(raw, gigType) : raw;
+  const withTriage = (await store.updateRequest(created.id, {
+    triage: t,
+    ...(upgrade ? { category: "LIFE_SAFETY" as const, calloutFee: 0, escrowStatus: "REFUNDED" as const, upgradedToLifeSafety: true } : {}),
+  })) as HelpRequest;
   emit("request:updated", { request: withTriage });
   const final = input.location ? await startSearch(created.id) : await escalate(created.id);
   return final ?? withTriage;
@@ -125,6 +227,10 @@ export function tick(id: string): Promise<{ advanced: boolean; request: HelpRequ
     const store = getStore();
     const r = await store.getRequest(id);
     if (!r || r.status !== "searching") return { advanced: false, request: r };
+    if (fallbackDue(r)) { // 3-minute smart fallback: escalate at once, even mid-wave
+      await expirePinged(id);
+      return { advanced: true, request: await escalateLocked(id) };
+    }
     const elapsed = r.waveStartedAt === null || Date.now() - Date.parse(r.waveStartedAt) >= waveWindowMs() - grace();
     const ds = await store.listDispatches(id);
     if (!elapsed && ds.some((d) => d.wave === r.wave && d.status === "pinged")) return { advanced: false, request: r };
@@ -155,14 +261,24 @@ export async function onReject(dispatchId: string, via: Channel = "app"): Promis
 
 export type AcceptOk = { ok: true; request: HelpRequest; dispatch: Dispatch; location: LatLng | null; mapsUrl: string | null; requesterPhone: string | null };
 
-export async function accept(dispatchId: string, via: Channel = "app"): Promise<AcceptOk | { ok: false; reason: StoreErrorReason }> {
+/** "tier_required": the request is a paid micro-gig and the helper is not a TIER_2_CERTIFIED_PRO (policy canAccept). */
+export type AcceptFailReason = StoreErrorReason | "tier_required";
+export type ClaimFailReason = AcceptFailReason | "own_request";
+export type AcceptResult = AcceptOk | { ok: false; reason: AcceptFailReason };
+export type ClaimResult = AcceptOk | { ok: false; reason: ClaimFailReason };
+
+export async function accept(dispatchId: string, via: Channel = "app"): Promise<AcceptResult> {
   const d0 = await getStore().getDispatch(dispatchId);
   if (!d0) return { ok: false, reason: "not_found" };
   return withRequestLock(d0.requestId, () => acceptLocked(dispatchId, via));
 }
 
-async function acceptLocked(dispatchId: string, via: Channel): Promise<AcceptOk | { ok: false; reason: StoreErrorReason }> {
+async function acceptLocked(dispatchId: string, via: Channel): Promise<AcceptResult> {
   const store = getStore();
+  const d = await store.getDispatch(dispatchId);
+  if (!d) return { ok: false, reason: "not_found" };
+  const [target, who] = await Promise.all([store.getRequest(d.requestId), store.getHelper(d.helperId)]);
+  if (target && !canAccept(who ?? {}, target)) return { ok: false, reason: "tier_required" };
   const res = await store.acceptDispatch(dispatchId);
   if (!res.ok) return res;
   const dispatch = via === "sms" ? ((await store.updateDispatch(dispatchId, { channel: "sms" })) as Dispatch) : res.dispatch;
@@ -182,13 +298,15 @@ async function acceptLocked(dispatchId: string, via: Channel): Promise<AcceptOk 
  * A neighbour who saw the request in their feed takes it, even if dispatch did not ping them (or it escalated).
  * Reuses their pinged dispatch if they have one; otherwise creates one and accepts it atomically.
  */
-export async function claim(requestId: string, helperId: string): Promise<AcceptOk | { ok: false; reason: StoreErrorReason | "own_request" }> {
+export async function claim(requestId: string, helperId: string): Promise<ClaimResult> {
   return withRequestLock(requestId, async () => {
     const store = getStore();
     const r = await store.getRequest(requestId);
     if (!r) return { ok: false as const, reason: "not_found" as const };
     if (r.requesterHelperId === helperId) return { ok: false as const, reason: "own_request" as const };
     if (r.status !== "searching" && r.status !== "escalated") return { ok: false as const, reason: "already_matched" as const };
+    // Checked before a dispatch is created, so a refused claim leaves no trace and the request keeps searching.
+    if (!canAccept((await store.getHelper(helperId)) ?? {}, r)) return { ok: false as const, reason: "tier_required" as const };
     const mine = (await store.listDispatches(requestId)).find((d) => d.helperId === helperId && d.status === "pinged");
     let id = mine?.id;
     if (!id) {
@@ -228,7 +346,7 @@ export function cancel(id: string): Promise<Simple> {
       const u = await store.updateDispatch(d.id, { status: "cancelled", respondedAt: nowIso() });
       if (u) emit("dispatch:updated", { dispatch: u, request: r });
     }
-    const request = (await store.updateRequest(id, { status: "cancelled", waveStartedAt: null })) as HelpRequest;
+    const request = (await store.updateRequest(id, { status: "cancelled", waveStartedAt: null, ...(r.escrowStatus === "HELD" ? { escrowStatus: "REFUNDED" as const } : {}) })) as HelpRequest;
     emit("request:updated", { request });
     return { ok: true, request };
   });
@@ -240,10 +358,18 @@ export function resolve(id: string): Promise<Simple> {
     const r = await store.getRequest(id);
     if (!r) return { ok: false, reason: "not_found" };
     if (r.status !== "matched") return { ok: false, reason: "conflict" };
-    const request = (await store.updateRequest(id, { status: "resolved" })) as HelpRequest;
-    emit("request:updated", { request });
+    let request = (await store.updateRequest(id, { status: "resolved" })) as HelpRequest;
+    // Mark as done = pay the helper. Same lock, so this and POST /api/incident/payout can never both credit.
+    const released = await releaseEscrowLocked(id);
+    if (released.ok) request = released.request;
+    if (!released.ok || released.alreadyReleased) emit("request:updated", { request }); // a fresh release already emitted it
     return { ok: true, request };
   });
+}
+
+/** POST /api/incident/payout. Idempotent: the first call after "resolved" credits the helper, later calls only report. */
+export function payout(requestId: string): Promise<EscrowRelease> {
+  return withRequestLock(requestId, () => releaseEscrowLocked(requestId));
 }
 
 export function rate(id: string, stars: number): Promise<{ ok: true; request: HelpRequest; helper: Helper | null } | { ok: false; reason: "conflict" | "not_found" }> {
@@ -253,12 +379,12 @@ export function rate(id: string, stars: number): Promise<{ ok: true; request: He
     if (!r) return { ok: false, reason: "not_found" };
     if (r.status !== "resolved" || !r.matchedHelperId) return { ok: false, reason: "conflict" };
     await store.saveRating({ id: randomUUID(), requestId: id, helperId: r.matchedHelperId, stars, createdAt: nowIso() });
-    const h = await store.getHelper(r.matchedHelperId);
-    let helper: Helper | null = null;
-    if (h) {
-      helper = await store.upsertHelper({ ...h, reliability: +(0.8 * h.reliability + 0.2 * (stars / 5)).toFixed(4) });
-      emit("helper:updated", { helper });
-    }
+    const helperId = r.matchedHelperId;
+    const helper = await withHelperLock(helperId, async () => { // same lock as the wallet credit: neither write can clobber the other
+      const h = await store.getHelper(helperId);
+      return h ? store.upsertHelper({ ...h, reliability: +(0.8 * h.reliability + 0.2 * (stars / 5)).toFixed(4) }) : null;
+    });
+    if (helper) emit("helper:updated", { helper });
     return { ok: true, request: r, helper };
   });
 }
@@ -271,7 +397,7 @@ export async function tickDueRequests(): Promise<number> {
   let n = 0;
   for (const r of await getStore().listOpenRequests()) {
     if (r.status !== "searching") continue;
-    if (r.waveStartedAt && Date.now() - Date.parse(r.waveStartedAt) < waveWindowMs() - grace()) continue;
+    if (!fallbackDue(r) && r.waveStartedAt && Date.now() - Date.parse(r.waveStartedAt) < waveWindowMs() - grace()) continue;
     if ((await tick(r.id)).advanced) n++;
   }
   return n;

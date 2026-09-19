@@ -2,28 +2,41 @@
  * ResQ triage — Ollama structured classification with a rules fallback
  * (README §4, §10 rule 2; CONTRACTS §6 `GET/POST /api/triage`, §7 `lib/triage.ts`).
  *
- * The model only CLASSIFIES (need type, urgency, skills, one-line summary). Everything
- * the user is told to do comes from curated cards in lib/guidance.ts, and every
- * decision that matters for safety is made by explainable code here or in
- * lib/triage-rules.ts. `triage()` never throws and never hangs longer than
+ * The model only CLASSIFIES (need type, urgency, skills, equipment, hidden scene hazard,
+ * one-line summary). Everything the user is told to do comes from curated cards in
+ * lib/guidance.ts, and every decision that matters for safety is made by explainable code
+ * here or in lib/triage-rules.ts. `triage()` never throws and never hangs longer than
  * OLLAMA_TIMEOUT_MS (default 4 s): on any failure it returns `triageByRules(text)`.
+ *
+ * Hazard alerts (docs/UPGRADE.md §2, README §10 rule 9): the JSON schema makes the model fill
+ * `hazardAlert { hasHazard, hazardKind }` and ONLY those two are ever read. The warning a
+ * frightened person sees is `hazardAlertFor(kind)` from the curated table in lib/hazards.ts.
+ * `hazardTitle` / `hazardAction` are NOT requested from the model: with them in the schema the
+ * warm qwen2.5:3b answered the demo phrases in 3.0–3.9 s (110–136 output tokens at ~40 tok/s),
+ * flush against the 4 s timeout, and the longer prompt made the need-type classification worse.
+ * Without them: 47–67 tokens, 1.3–1.9 s. If the model ever sends those keys anyway (older
+ * prompts, `format: "json"` fallback), `readModelHazard` ignores them. Keyword rules
+ * (`detectHazardByRules`) run on every request and win over the model whenever they fire.
  *
  * All env vars (OLLAMA_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT_MS) are read at call time so
  * tests can point at a fake server.
  */
 import {
+  EQUIPMENT,
   NEED_TYPES,
   SKILLS,
   URGENCIES,
   TYPE_SKILLS,
   TYPE_LABELS,
+  isEquipment,
   isNeedType,
   isSkill,
   isUrgency,
 } from "./taxonomy";
-import type { NeedType, Skill, TriageResult, Urgency } from "./types";
-import { triageByRules } from "./triage-rules";
-import { NO_HAZARD } from "./hazards";
+import type { Equipment, HazardAlert, NeedType, Skill, TriageResult, Urgency } from "./types";
+import { MAX_EQUIPMENT, detectEquipmentByRules, detectHazardByRules, triageByRules } from "./triage-rules";
+import { HAZARD_KINDS, hazardAlertFor, isHazardKind } from "./hazards";
+import type { HazardKind } from "./hazards";
 
 export type OllamaTriageOutput = {
   type: NeedType;
@@ -31,7 +44,12 @@ export type OllamaTriageOutput = {
   skills: Skill[];
   summary: string;
   confidence: number;
+  equipment: Equipment[]; // keyword rules ∪ valid model entries, max MAX_EQUIPMENT
+  hazardAlert: HazardAlert; // curated text for the classified kind — never the model's words
 };
+
+/** Output budget: the compact JSON is 47–67 tokens for the demo phrases; 256 leaves room for a long summary. */
+export const OLLAMA_NUM_PREDICT = 256;
 
 // ---------------------------------------------------------------------------
 // Env (read inside functions, never at module load)
@@ -69,10 +87,38 @@ export function isTriageOutput(x: unknown): x is { type: NeedType; urgency: Urge
 }
 
 /**
+ * What survives of the model's `hazardAlert`: the classification, nothing else. Lenient —
+ * anything that is not an object is "no hazard"; `hasHazard: true` with a missing, unknown or
+ * "none" kind is "other" (the model saw a danger it could not name). `hazardTitle` and
+ * `hazardAction` are deliberately NOT read: an LLM must not word safety instructions.
+ */
+export function readModelHazard(raw: unknown): { hasHazard: boolean; kind: HazardKind } {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { hasHazard: false, kind: "none" };
+  const o = raw as Record<string, unknown>;
+  const hasHazard = o.hasHazard === true || (typeof o.hasHazard === "string" && o.hasHazard.trim().toLowerCase() === "true");
+  if (!hasHazard) return { hasHazard: false, kind: "none" };
+  const k = o.hazardKind !== undefined ? o.hazardKind : o.kind; // `format: "json"` fallback models sometimes shorten the key
+  return { hasHazard: true, kind: isHazardKind(k) && k !== "none" ? k : "other" };
+}
+
+/** Rule equipment first (deterministic), then the model's valid entries; deduped, max MAX_EQUIPMENT. */
+export function mergeEquipment(fromRules: Equipment[], fromModel: unknown): Equipment[] {
+  const out: Equipment[] = [];
+  for (const e of fromRules) if (isEquipment(e) && !out.includes(e)) out.push(e);
+  if (Array.isArray(fromModel)) {
+    for (const e of fromModel) if (isEquipment(e) && !out.includes(e)) out.push(e);
+  }
+  return out.slice(0, MAX_EQUIPMENT);
+}
+
+/**
  * Apply CONTRACTS §7 leniency to a guarded object:
  * - skills: array entries that are valid Skills, deduped; non-array/empty → TYPE_SKILLS[type]
  * - confidence: finite number clamped 0..1; missing/NaN → 0.5
  * - summary: string truncated to 140 chars; missing/non-string → first 100 chars of the input text
+ * - equipment: detectEquipmentByRules(text) ∪ valid model entries, deduped, max 4
+ * - hazardAlert: kind = detectHazardByRules(text) when it fires, else the model's kind (see
+ *   readModelHazard); the returned alert is ALWAYS hazardAlertFor(kind) — curated words only
  */
 export function normalizeTriageOutput(
   x: { type: NeedType; urgency: Urgency },
@@ -101,7 +147,13 @@ export function normalizeTriageOutput(
     summary = text.trim().slice(0, 100);
   }
 
-  return { type: x.type, urgency: x.urgency, skills, summary, confidence };
+  const equipment = mergeEquipment(detectEquipmentByRules(text), o.equipment);
+
+  const byRules = detectHazardByRules(text);
+  const kind: HazardKind = byRules !== "none" ? byRules : readModelHazard(o.hazardAlert).kind;
+  const hazardAlert = hazardAlertFor(kind);
+
+  return { type: x.type, urgency: x.urgency, skills, summary, confidence, equipment, hazardAlert };
 }
 
 // ---------------------------------------------------------------------------
@@ -110,12 +162,12 @@ export function normalizeTriageOutput(
 
 /** One-line description per need type for the system prompt. */
 const TYPE_HINTS: Record<NeedType, string> = {
-  flood_rescue: "people in or surrounded by rising water, drowning, need a boat/swimmer",
+  flood_rescue: "people in or surrounded by rising water, flooded house or basement, drowning, need a boat/swimmer/pump",
   cardiac_no_breathing: "collapsed, unconscious, not breathing, no pulse, chest pain",
   bleeding: "heavy or uncontrolled bleeding, deep wound",
   fracture: "broken bone, fall injury, cannot bear weight",
   electrical: "electric shock, live wire, electrocution, sparking",
-  fire: "fire, smoke, burns, gas leak",
+  fire: "fire, smoke, burns, gas leak or smell of gas, explosion",
   trapped_structural: "trapped under debris, building or wall collapse, landslide",
   snakebite: "snake bite or venomous bite/sting",
   evacuation_mobility: "must move someone who cannot move (elderly, disabled, bedridden, baby, pregnant)",
@@ -124,24 +176,45 @@ const TYPE_HINTS: Record<NeedType, string> = {
   other: "anything that fits none of the above",
 };
 
-/** System prompt (≤ ~200 tokens of instructions plus the taxonomy lists; no examples). */
+/** One-line meaning per hazard kind for the system prompt (the user never sees these; see lib/hazards.ts). */
+const HAZARD_HINTS: Record<HazardKind, string> = {
+  electrocution: "water or wet floor indoors (flooded room/basement), water near wiring/sockets/meter, fallen or live wire",
+  gas_leak: "smell of gas, LPG cylinder leaking",
+  fire_smoke: "fire, smoke, burning, explosion",
+  fast_water: "fast or rising water outdoors, river in flood, people swept away",
+  structural_collapse: "cracked or collapsed building/wall/roof, landslide, rubble",
+  contaminated_water: "sewage, drain overflow, dirty flood water",
+  chemical: "acid, chemical spill, toxic fumes, pesticide",
+  traffic: "casualty on a road with moving vehicles",
+  animal: "snake, dog, bees, wasps, elephant nearby",
+  other: "a real scene danger that fits none of the above",
+  none: "no danger from the surroundings (purely medical: collapse, bleeding, fracture, fever, medicines)",
+};
+
+/** System prompt: short instructions plus the taxonomy lists (types, skills, equipment, hazard kinds); no examples. */
 export function buildSystemPrompt(): string {
   const typeLines = NEED_TYPES.map((t) => `- ${t}: ${TYPE_LABELS[t]} — ${TYPE_HINTS[t]}`).join("\n");
+  const hazardLines = HAZARD_KINDS.map((k) => `- ${k}: ${HAZARD_HINTS[k]}`).join("\n");
   return [
     "You are the triage classifier for a neighbourhood emergency response app in Kerala, India.",
-    "Classify the user's message. Output JSON only, no prose, no markdown.",
+    "Classify the user's message. Output compact JSON on one line, no prose, no markdown, no line breaks.",
     "",
     "type must be exactly one of:",
     typeLines,
     "",
     `urgency must be one of: ${URGENCIES.join(", ")}.`,
     `skills is a list of helper skills needed, each one of: ${SKILLS.join(", ")}.`,
+    `equipment is what a helper must bring, ONLY if the message names it, each one of: ${EQUIPMENT.join(", ")}. Usually [].`,
     "summary is one short line (max 140 characters) restating the emergency.",
     "confidence is your certainty 0..1 that type and urgency are correct.",
     "Prefer evacuation_mobility when there is water plus a person who cannot move.",
     "",
+    "HIDDEN ENVIRONMENTAL HAZARD: could the surroundings injure the person or an arriving helper, even if unsaid (flood water indoors may be electrified)? hazardAlert.hazardKind must be exactly one of:",
+    hazardLines,
+    "hazardAlert.hasHazard is true exactly when hazardKind is not none. Never invent a hazard for a purely medical emergency.",
+    "",
     "Return exactly this JSON shape:",
-    '{"type":"<type>","urgency":"<urgency>","skills":["<skill>"],"summary":"<one line>","confidence":0.0}',
+    '{"type":"<type>","urgency":"<urgency>","skills":["<skill>"],"equipment":[],"summary":"<one line>","confidence":0.0,"hazardAlert":{"hasHazard":false,"hazardKind":"none"}}',
   ].join("\n");
 }
 
@@ -153,10 +226,21 @@ export function triageSchema(): Record<string, unknown> {
       type: { type: "string", enum: [...NEED_TYPES] },
       urgency: { type: "string", enum: [...URGENCIES] },
       skills: { type: "array", items: { type: "string", enum: [...SKILLS] } },
+      equipment: { type: "array", items: { type: "string", enum: [...EQUIPMENT] } },
       summary: { type: "string" },
       confidence: { type: "number" },
+      // Classification only. hazardTitle/hazardAction are deliberately absent (latency, see the header);
+      // the UI shows lib/hazards.ts text for the kind, never model words.
+      hazardAlert: {
+        type: "object",
+        properties: {
+          hasHazard: { type: "boolean" },
+          hazardKind: { type: "string", enum: [...HAZARD_KINDS] },
+        },
+        required: ["hasHazard", "hazardKind"],
+      },
     },
-    required: ["type", "urgency", "skills", "summary", "confidence"],
+    required: ["type", "urgency", "skills", "equipment", "summary", "confidence", "hazardAlert"],
   };
 }
 
@@ -213,7 +297,7 @@ export async function triageWithOllama(text: string, signal: AbortSignal): Promi
     system: buildSystemPrompt(),
     prompt: text,
     stream: false,
-    options: { temperature: 0, num_predict: 200 },
+    options: { temperature: 0, num_predict: OLLAMA_NUM_PREDICT },
     keep_alive: "30m",
   };
 
@@ -236,7 +320,7 @@ export async function triageWithOllama(text: string, signal: AbortSignal): Promi
     throw new Error("ollama: output failed type guard");
   }
   const normalised = normalizeTriageOutput(parsed, text);
-  return { ...normalised, source: "ollama", clarifyingQuestion: null, equipment: [], hazardAlert: NO_HAZARD };
+  return { ...normalised, source: "ollama", clarifyingQuestion: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +331,15 @@ export async function triageWithOllama(text: string, signal: AbortSignal): Promi
  * Classify `text`. Tries Ollama under OLLAMA_TIMEOUT_MS; falls back to
  * `triageByRules(text)` on throw / abort / invalid output / confidence < 0.5
  * (README §4). Applies `applyUrgencyFloor` to every Ollama result. Never throws.
+ *
+ * `equipment` and `hazardAlert` in every branch:
+ *   model unsure (< 0.5) / any failure → the rules result as-is: rule equipment, rule hazard.
+ *   rules overrule the model's type    → rule equipment and rule hazard too. A model that misread
+ *       the situation ("father collapsed" → structural collapse) must not get to put its hazard
+ *       banner on top of the CPR card.
+ *   model and rules agree / rules weak → the model's result, which normalizeTriageOutput already
+ *       merged: rule hazard if one fired, else the model's kind; rule equipment ∪ model equipment.
+ * In all three the alert text is hazardAlertFor(kind) — curated, never generated.
  */
 const URGENCY_RANK: Record<Urgency, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 function maxUrgency(a: Urgency, b: Urgency): Urgency {
@@ -267,9 +360,20 @@ export async function triage(text: string): Promise<TriageResult> {
     } else if (rules.confidence >= 0.8 && rules.type !== fromOllama.type) {
       // A strong, explicit keyword match beats a 3B model that disagrees (e.g. "water rising, grandmother can't
       // walk" must be evacuation, not structural collapse). Keep the model's one-line summary; report "rules".
-      result = { ...rules, summary: fromOllama.summary || rules.summary, urgency: maxUrgency(rules.urgency, fromOllama.urgency) };
+      result = {
+        ...rules,
+        summary: fromOllama.summary || rules.summary,
+        urgency: maxUrgency(rules.urgency, fromOllama.urgency),
+        equipment: rules.equipment,
+        hazardAlert: rules.hazardAlert,
+      };
     } else {
-      result = { ...fromOllama, urgency: maxUrgency(applyUrgencyFloor(fromOllama.type, fromOllama.urgency), rules.type === fromOllama.type ? rules.urgency : "low") };
+      result = {
+        ...fromOllama,
+        urgency: maxUrgency(applyUrgencyFloor(fromOllama.type, fromOllama.urgency), rules.type === fromOllama.type ? rules.urgency : "low"),
+        equipment: fromOllama.equipment,
+        hazardAlert: fromOllama.hazardAlert,
+      };
     }
   } catch {
     result = triageByRules(text);
@@ -278,7 +382,9 @@ export async function triage(text: string): Promise<TriageResult> {
   }
 
   const ms = Date.now() - started;
-  console.log(`[triage] source=${result.source} type=${result.type} urgency=${result.urgency} ms=${ms}`);
+  console.log(
+    `[triage] source=${result.source} type=${result.type} urgency=${result.urgency} hazard=${result.hazardAlert.kind} equipment=${result.equipment.join("+") || "-"} ms=${ms}`,
+  );
   return result;
 }
 
@@ -307,8 +413,10 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 /**
  * Checks `/api/tags` for the model (5 s), then — only when present — runs a tiny
  * generate with `keep_alive: "30m"` under its OWN 60 s timeout (a cold load can take
- * 20–30 s; never OLLAMA_TIMEOUT_MS). Never throws; "down" when unreachable or the
- * model is missing.
+ * 20–30 s; never OLLAMA_TIMEOUT_MS). The warm-up carries the real system prompt so Ollama's
+ * prompt cache already holds that prefix: the first real triage then only evaluates the user's
+ * sentence (the prompt is ~900 tokens ≈ 2 s of the 4 s budget when it is not cached).
+ * Never throws; "down" when unreachable or the model is missing.
  */
 export async function warmOllama(): Promise<WarmResult> {
   const started = Date.now();
@@ -341,9 +449,10 @@ export async function warmOllama(): Promise<WarmResult> {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           model,
+          system: buildSystemPrompt(),
           prompt: "ok",
           stream: false,
-          options: { num_predict: 5 },
+          options: { temperature: 0, num_predict: 1 },
           keep_alive: "30m",
         }),
       },

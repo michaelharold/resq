@@ -1,6 +1,7 @@
 /** Hand-written input guards shared by every route (README §10 rule 6). */
 import { BLOOD_GROUPS, SKILLS, isEquipment, isSkill } from "./taxonomy";
-import type { Equipment, UserProfile } from "./types";
+import { GIG_TYPES, isCalloutFee, isGigType, isTrustTier, tierOf } from "./policy";
+import type { Equipment, GigType, RequestCategory, TrustTier, UserProfile } from "./types";
 import type { LatLng, Skill } from "./types";
 
 export function isLatLng(x: unknown): x is LatLng {
@@ -54,6 +55,51 @@ export function profileOf(x: unknown, normalizePhone: (p: unknown) => string | n
   const emergencyContactPhone = ecp === undefined || ecp === null || ecp === "" ? null : normalizePhone(ecp);
   if (ecp && !emergencyContactPhone) return { ok: false, field: "emergencyContactPhone" };
   return { ok: true, value: { age, bloodGroup, address, medicalNotes, emergencyContactName, emergencyContactPhone } };
+}
+
+/**
+ * Own-key gig type guard. lib/policy.ts `isGigType` tests `x in GIG_TYPES`, which is also true for inherited keys
+ * ("toString", "constructor", "__proto__" …); GIG_TYPES[x].skills would then throw. Use this one for untrusted input.
+ */
+export function isKnownGigType(x: unknown): x is GigType {
+  return isGigType(x) && Object.prototype.hasOwnProperty.call(GIG_TYPES, x);
+}
+
+/**
+ * category / gigType / calloutFee of POST /api/requests (docs/UPGRADE.md §1). Absent category = LIFE_SAFETY.
+ * A life-safety request is always free, so gigType / calloutFee sent with it are ignored rather than rejected:
+ * a cry for help is never refused over a payment field.
+ */
+export function pricingOf(b: Record<string, unknown>):
+  | { ok: true; value: { category: RequestCategory; gigType: GigType | null; calloutFee: number } }
+  | { ok: false; error: "category_invalid" | "gigType_invalid" | "calloutFee_invalid" } {
+  const category = b.category === undefined || b.category === null ? "LIFE_SAFETY" : b.category;
+  if (category !== "LIFE_SAFETY" && category !== "HOUSEHOLD_MICROGIG") return { ok: false, error: "category_invalid" };
+  if (category === "LIFE_SAFETY") return { ok: true, value: { category, gigType: null, calloutFee: 0 } };
+  if (!isKnownGigType(b.gigType)) return { ok: false, error: "gigType_invalid" };
+  if (!isCalloutFee(b.calloutFee)) return { ok: false, error: "calloutFee_invalid" };
+  return { ok: true, value: { category, gigType: b.gigType, calloutFee: b.calloutFee } };
+}
+
+/**
+ * trustTier + credentialId of POST /api/helpers (docs/UPGRADE.md §3). Absent fields keep the stored values;
+ * credentialId null / "" clears it. Tier 2 and Tier 3 need a licence / registration number of 3–40 characters.
+ * Tiers are self-declared in the demo: nothing here verifies the number.
+ */
+export function trustOf(b: Record<string, unknown>, existing: { trustTier?: TrustTier; credentialId?: string | null } | null):
+  | { ok: true; value: { trustTier: TrustTier; credentialId: string | null } }
+  | { ok: false; error: "trustTier_invalid" | "credentialId_invalid" } {
+  if (b.trustTier !== undefined && !isTrustTier(b.trustTier)) return { ok: false, error: "trustTier_invalid" };
+  const trustTier: TrustTier = isTrustTier(b.trustTier) ? b.trustTier : tierOf(existing);
+  let credentialId: string | null;
+  if (b.credentialId === undefined) credentialId = existing?.credentialId ?? null;
+  else if (b.credentialId === null || b.credentialId === "") credentialId = null;
+  else {
+    credentialId = text(b.credentialId, 40);
+    if (credentialId === null || credentialId.length < 3) return { ok: false, error: "credentialId_invalid" };
+  }
+  if (trustTier !== "TIER_1_NEIGHBOR" && credentialId === null) return { ok: false, error: "credentialId_invalid" };
+  return { ok: true, value: { trustTier, credentialId } };
 }
 
 export async function readJson(req: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {

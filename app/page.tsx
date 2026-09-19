@@ -4,11 +4,13 @@
  *   sign in (phone + code) → onboarding (basic details, skills, equipment) → dashboard
  *   dashboard: "Ask for help" (minimal form, the rest comes from the profile) + your request + the job you accepted
  *              + nearby requests that need your skills or equipment (tap → full details → I'll help / Not now)
+ * Upgrade (docs/UPGRADE.md): trust-tier badge at sign-up, free emergencies vs paid household callouts (escrow → wallet),
+ * and hands-free voice: tap the mic, speak, the transcript is triaged and sent after a 3 s cancellable countdown.
  */
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
-import { Badge, Call112Bar, Container, Logo, NavBar, PhoneShell, PulsingDot, initials } from "@/components/ui";
+import { Badge, Call112Bar, Container, Logo, NavBar, PhoneShell, PulsingDot, TypingDots, initials } from "@/components/ui";
 import { EMERGENCY_TILES, SKILL_META, SkillPill, URGENCY_STYLE } from "@/components/skills";
 import { EQUIPMENT_META, EquipmentPill, PERSON_SKILLS, RESOURCE_SKILLS } from "@/components/equipment";
 import { OtpForm } from "@/components/OtpForm";
@@ -16,15 +18,18 @@ import { BeaconChip } from "@/components/BeaconChip";
 import { ActiveJob, PersonDetails, beep } from "@/components/ActiveJob";
 import { RequestScreen, Triaging } from "@/components/RequestView";
 import { LiveMap, type MapMarker } from "@/components/LiveMap";
+import { TIER_META, TrustBadge } from "@/components/TrustBadge";
+import { VoiceMic } from "@/components/VoiceMic";
 import { DEMO_RADIUS_KM, api, demoSpot, distanceKm, fmtDistance, fmtTime, getHelperToken, getPosition, setHelperToken, stepToward, type LatLng } from "@/lib/client/api";
 import { useLocationBeacon } from "@/lib/client/beacon";
 import { useSecondsLeft, useSnapshot } from "@/lib/client/sse";
-import { useSpeech } from "@/lib/client/speech";
+import { speechErrorText, useSpeech } from "@/lib/client/speech";
+import { CALLOUT_FEES, GIG_TYPES, TRUST_TIERS, canAccept, categoryOf, feeOf, formatMoney, mustBeLifeSafety, tierOf, walletOf } from "@/lib/policy";
 import { BLOOD_GROUPS, EQUIPMENT, EQUIPMENT_LABELS, TYPE_LABELS } from "@/lib/taxonomy";
 import type { Dashboard, FeedItem } from "@/lib/feed";
-import type { Equipment, Helper, RequestView, RequesterRole, Skill, UserProfile } from "@/lib/types";
+import type { Equipment, GigType, Helper, HelpRequest, RequestCategory, RequestView, RequesterRole, Skill, TriageResult, TrustTier, UserProfile } from "@/lib/types";
 
-type Config = { seedCenter: LatLng; waveWindowMs: number; smsNumber: string | null };
+type Config = { seedCenter: LatLng; waveWindowMs: number; smsNumber: string | null; fallbackMs: number; currency: string; calloutFees: number[] };
 type Screen = "loading" | "auth" | "onboarding" | "dashboard" | "profile" | "ask" | "request";
 
 /** Where this person is: GPS if it is plausibly at the venue, else this window's demo spot near TKMCE. */
@@ -120,18 +125,36 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
   });
   const [skills, setSkills] = useState<Skill[]>(me?.skills ?? []);
   const [equipment, setEquipment] = useState<Equipment[]>(me?.equipment ?? []);
+  const [tier, setTier] = useState<TrustTier>(tierOf(me));
+  const [credentialId, setCredentialId] = useState(me?.credentialId ?? "");
   const [available, setAvailable] = useState(me ? me.onDuty : true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const set = (k: keyof UserProfile) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setProfile({ ...profile, [k]: e.target.value });
   const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 
+  // Tier 2 / Tier 3 must give a licence / registration number (3–40 characters); Tier 1 needs nothing.
+  const needsCredential = tier !== "TIER_1_NEIGHBOR";
+  const credential = credentialId.trim();
+  const credentialOk = !needsCredential || (credential.length >= 3 && credential.length <= 40);
+  const CREDENTIAL_MSG = "Enter your licence / registration number (3–40 characters) to claim this badge.";
+
   const save = async () => {
+    if (!credentialOk) { setMsg(CREDENTIAL_MSG); setStep(1); return; }
     setBusy(true); setMsg(null);
     const r = await api<{ token?: string; helper: Helper }>("/api/helpers", {
-      body: { name, phone, skills, equipment, profile: { ...profile, age: profile.age ? Number(profile.age) : null } },
+      body: {
+        name, phone, skills, equipment, trustTier: tier, credentialId: needsCredential ? credential : null,
+        profile: { ...profile, age: profile.age ? Number(profile.age) : null },
+      },
     });
-    if (!r.ok) { setBusy(false); setMsg(`Please check your details (${r.error.replace(/_/g, " ")}).`); setStep(0); return; }
+    if (!r.ok) {
+      setBusy(false);
+      const badge = r.error.startsWith("credentialId") || r.error.startsWith("trustTier");
+      setMsg(badge ? CREDENTIAL_MSG : `Please check your details (${r.error.replace(/_/g, " ")}).`);
+      setStep(badge ? 1 : 0);
+      return;
+    }
     if (r.data.token) setHelperToken(r.data.token);
     const loc = await whereAmI(center);
     await api("/api/helpers", { method: "PATCH", body: { onDuty: available, location: loc.at } });
@@ -169,7 +192,7 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
             <label className="text-sm font-semibold text-resq-navy">Emergency contact name<input value={profile.emergencyContactName} onChange={set("emergencyContactName")} maxLength={60} className={input} /></label>
             <label className="text-sm font-semibold text-resq-navy">Emergency contact phone<input type="tel" value={profile.emergencyContactPhone} onChange={set("emergencyContactPhone")} className={input} /></label>
             {msg && <p role="alert" className="text-sm font-medium text-resq-red sm:col-span-2">{msg}</p>}
-            <button onClick={() => (name.trim() ? setStep(1) : setMsg("Please enter your name."))} className="min-h-14 rounded-2xl bg-resq-red font-display text-lg font-bold text-white sm:col-span-2">Next</button>
+            <button onClick={() => (name.trim() ? (setMsg(null), setStep(1)) : setMsg("Please enter your name."))} className="min-h-14 rounded-2xl bg-resq-red font-display text-lg font-bold text-white sm:col-span-2">Next</button>
           </div>
         )}
 
@@ -211,19 +234,50 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
                 );
               })}
             </div>
-            <button onClick={() => setStep(2)} className="mt-6 min-h-14 w-full rounded-2xl bg-resq-red font-display text-lg font-bold text-white">Next</button>
+            <h2 className="mt-6 font-display text-lg font-bold text-resq-navy">Verification badge</h2>
+            <p className="mb-3 text-sm text-resq-slate">Shown next to your name, so people know who is coming to help.</p>
+            <div role="radiogroup" aria-label="Verification badge" className="grid gap-2.5 sm:grid-cols-3">
+              {TRUST_TIERS.map((t) => {
+                const m = TIER_META[t], on = tier === t;
+                return (
+                  <button key={t} type="button" role="radio" aria-checked={on} onClick={() => { setTier(t); setMsg(null); }}
+                    style={on ? { borderColor: m.color, background: m.bg } : undefined}
+                    className={`flex min-h-16 items-start gap-3 rounded-2xl border-2 p-3 text-left ${on ? "shadow-md" : "border-slate-100 bg-white"}`}>
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl [&_svg]:h-5 [&_svg]:w-5" style={{ background: on ? "#fff" : m.bg, color: m.color }}>{m.icon}</div>
+                    <div className="min-w-0 flex-1">
+                      <p className="flex flex-wrap items-center gap-x-1.5 text-sm font-bold" style={{ color: m.color }}>{m.label}
+                        {t === "TIER_1_NEIGHBOR" && <span className="rounded-md bg-white/70 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-resq-slate ring-1 ring-slate-200">Default</span>}</p>
+                      <p className="mt-0.5 text-xs leading-snug text-resq-slate">{m.desc}</p>
+                    </div>
+                    <span aria-hidden className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 text-white"
+                      style={on ? { borderColor: m.color, background: m.color } : { borderColor: "#CBD5E1" }}>{on && <Icon.Check size={12} />}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {needsCredential && (
+              <label className="animate-fade-in mt-3 block text-sm font-semibold text-resq-navy">Licence / registration number *
+                <input value={credentialId} onChange={(e) => { setCredentialId(e.target.value); setMsg(null); }} minLength={3} maxLength={40} required autoComplete="off"
+                  aria-invalid={!!msg && !credentialOk}
+                  placeholder={tier === "TIER_2_CERTIFIED_PRO" ? "e.g. Wireman licence KL/EL/2021/04567" : "e.g. Medical council reg. no. 45678"} className={input} />
+              </label>
+            )}
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-resq-slate"><Icon.Shield size={14} className="mt-px flex-shrink-0" />Self-declared in this demo. Verification by authorities is on the roadmap.</p>
+            {msg && <p role="alert" className="mt-3 rounded-xl bg-resq-red-light p-3 text-sm font-medium text-resq-red">{msg}</p>}
+            <button onClick={() => (credentialOk ? (setMsg(null), setStep(2)) : setMsg(CREDENTIAL_MSG))} className="mt-6 min-h-14 w-full rounded-2xl bg-resq-red font-display text-lg font-bold text-white">Next</button>
           </div>
         )}
 
         {step === 2 && (
           <div className="space-y-4">
             <div className="card-shadow rounded-2xl bg-white p-5">
-              <p className="font-display text-lg font-bold text-resq-navy">{name}</p>
+              <div className="flex flex-wrap items-center gap-2"><p className="font-display text-lg font-bold text-resq-navy">{name}</p><TrustBadge tier={tier} /></div>
               <p className="text-sm text-resq-slate">{phone}{profile.bloodGroup ? ` · ${profile.bloodGroup}` : ""}{profile.age ? ` · ${profile.age} yrs` : ""}</p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {skills.map((s) => <SkillPill key={s} skill={s} />)}{equipment.map((e) => <EquipmentPill key={e} item={e} />)}
                 {skills.length + equipment.length === 0 && <span className="text-sm text-resq-slate">No skills or equipment added.</span>}
               </div>
+              <p className="mt-3 text-xs text-resq-slate">{TIER_META[tier].desc}{needsCredential ? ` · Licence / reg. no. ${credential}` : ""} · self-declared in this demo</p>
             </div>
             <button onClick={() => setAvailable(!available)} aria-pressed={available}
               className={`flex min-h-16 w-full items-center justify-between rounded-2xl px-5 text-left ${available ? "bg-resq-green text-white" : "border-2 border-slate-200 bg-white text-resq-navy"}`}>
@@ -290,11 +344,22 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
     const r = await api<{ ok: boolean; reason?: string }>(`/api/requests/${f.request.id}/accept`, { method: "POST" });
     setOpen(null);
     setToast(r.ok ? `You're helping ${f.request.requesterName ?? "them"}. Your details were shared with them.`
+      : r.status === 403 && (r.data.reason === "tier_required" || r.error === "tier_required") ? "Only Certified Pros can accept paid household jobs."
       : r.data.reason === "already_matched" ? "Someone else already accepted this request. Thank you!" : "Could not accept that request.");
     void reload();
   };
   const notNow = async (f: FeedItem) => { await api(`/api/requests/${f.request.id}/decline`, { method: "POST" }); setOpen(null); void reload(); };
-  const done = async () => { if (dash.active) { await api(`/api/requests/${dash.active.request.id}`, { method: "PATCH", body: { action: "resolve" } }); void reload(); } };
+  // Mark as done → resolve, then release the escrow (idempotent: resolve already released it; this confirms the amount).
+  const done = async () => {
+    if (!dash.active) return;
+    const requestId = dash.active.request.id;
+    const r = await api(`/api/requests/${requestId}`, { method: "PATCH", body: { action: "resolve" } });
+    if (r.ok) {
+      const pay = await api<{ ok: boolean; amount: number; walletBalance: number }>("/api/incident/payout", { body: { requestId } });
+      if (pay.ok && pay.data.ok && pay.data.amount > 0) setToast(`${formatMoney(pay.data.amount)} added to your wallet`);
+    }
+    void reload();
+  };
   const signOut = async () => { await api("/api/auth/logout", { method: "POST", body: {} }); document.title = "ResQ"; onSignOut(); };
 
   return (
@@ -304,7 +369,8 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
           <div className="flex items-start justify-between gap-3">
             <button onClick={onProfile} className="flex items-center gap-3 text-left">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-resq-cyan to-resq-navy font-bold text-white">{initials(me.name)}</div>
-              <div><p className="text-sm text-white/60">Hello,</p><h1 className="font-display text-xl font-bold text-white">{me.name}</h1></div>
+              <div><p className="text-sm text-white/60">Hello,</p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><h1 className="font-display text-xl font-bold text-white">{me.name}</h1><TrustBadge tier={tierOf(me)} /></div></div>
             </button>
             <div className="flex items-center gap-2">
               <span className="flex items-center gap-1.5 rounded-xl bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-white"><PulsingDot color={connected ? "green" : "red"} />{connected ? "Live" : "…"}</span>
@@ -333,8 +399,9 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
           {dash.myRequest ? (
             <button onClick={() => onOpenRequest(dash.myRequest!.id)} className="card-shadow-lg animate-slide-up rounded-2xl border-2 border-resq-red bg-white p-5 text-left">
               <div className="flex items-center gap-2"><PulsingDot color="red" /><span className="text-xs font-bold uppercase tracking-wider text-resq-red">Your request</span>
+                <FeeChip r={dash.myRequest} />
                 <span className="ml-auto rounded-lg bg-slate-100 px-2 py-0.5 text-xs font-semibold capitalize text-resq-navy">{dash.myRequest.status}</span></div>
-              <p className="mt-2 font-display text-lg font-bold text-resq-navy">{dash.myRequest.triage ? TYPE_LABELS[dash.myRequest.triage.type] : "Understanding your request…"}</p>
+              <p className="mt-2 font-display text-lg font-bold text-resq-navy">{dash.myRequest.triage ? requestTitle(dash.myRequest) : "Understanding your request…"}</p>
               <p className="line-clamp-2 text-sm text-resq-slate">{dash.myRequest.description}</p>
               <p className="mt-2 text-sm font-semibold text-resq-cyan">{dash.myRequest.status === "matched" ? "A helper is on the way · view their details →" : "View live status, guidance and tracking →"}</p>
             </button>
@@ -346,6 +413,7 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
             </button>
           )}
           {dash.active && <ActiveJob r={dash.active.request} mapsUrl={dash.active.mapsUrl} me={me.location} simulated={beacon.source !== "gps"} onDone={done} />}
+          <WalletCard me={me} onProfile={onProfile} />
           <section className="card-shadow rounded-2xl border border-slate-100 bg-white p-4">
             <div className="mb-2 flex items-center justify-between"><h2 className="font-display font-semibold text-resq-navy">What you can offer</h2><button onClick={onProfile} className="min-h-10 px-2 text-sm font-semibold text-resq-cyan">Edit</button></div>
             <div className="flex flex-wrap gap-1.5">
@@ -379,6 +447,43 @@ function DashboardScreen({ initial, config, onAsk, onOpenRequest, onProfile, onS
   );
 }
 
+/** "Plumbing job" for a paid household callout, the triage label for an emergency. */
+function requestTitle(r: Pick<HelpRequest, "category" | "gigType" | "triage">): string {
+  if (categoryOf(r) === "HOUSEHOLD_MICROGIG" && r.gigType && r.gigType in GIG_TYPES) return `${GIG_TYPES[r.gigType].label} job`;
+  return r.triage ? TYPE_LABELS[r.triage.type] : "Emergency";
+}
+
+/** Money chip: "₹500 callout" for a paid household job, "FREE · emergency" for everything else. */
+function FeeChip({ r }: { r: Pick<HelpRequest, "category" | "calloutFee"> }) {
+  return categoryOf(r) === "HOUSEHOLD_MICROGIG"
+    ? <span className="inline-flex items-center whitespace-nowrap rounded-full bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700 ring-1 ring-blue-200">{formatMoney(feeOf(r))} callout</span>
+    : <span className="inline-flex items-center whitespace-nowrap rounded-full bg-resq-green-light px-2 py-0.5 text-xs font-bold text-resq-green ring-1 ring-green-200">FREE · emergency</span>;
+}
+
+function WalletIcon({ size = 22 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 7H5a2 2 0 010-4h13v4" /><path d="M3 5v14a2 2 0 002 2h15a1 1 0 001-1V8a1 1 0 00-1-1" /><circle cx="16.5" cy="14" r="1.2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** Demo wallet: escrowed callout fees land here when a paid job is marked done. */
+function WalletCard({ me, onProfile }: { me: Helper; onProfile: () => void }) {
+  const pro = tierOf(me) === "TIER_2_CERTIFIED_PRO";
+  return (
+    <section aria-label="Wallet" className="card-shadow flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-4">
+      <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700"><WalletIcon /></div>
+      <div className="min-w-0 flex-1">
+        <h2 className="font-display text-lg font-bold text-resq-navy">Wallet · <span className="text-blue-700">{formatMoney(walletOf(me))}</span></h2>
+        <p className="text-xs text-resq-slate">{pro ? "Callout fees are released here from escrow when you mark a paid job done. Demo wallet, no real money."
+          : "Emergencies are always free. Certified Pros earn callout fees for paid household jobs (demo wallet)."}</p>
+      </div>
+      {!pro && tierOf(me) === "TIER_1_NEIGHBOR" && <button onClick={onProfile} className="min-h-12 flex-shrink-0 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-resq-cyan">Get a badge</button>}
+    </section>
+  );
+}
+
 function FeedCard({ f, onOpen }: { f: FeedItem; onOpen: () => void }) {
   const r = f.request, t = r.triage;
   const left = useSecondsLeft(f.expiresAt);
@@ -386,7 +491,8 @@ function FeedCard({ f, onOpen }: { f: FeedItem; onOpen: () => void }) {
     <button onClick={onOpen} className={`card-shadow animate-slide-up w-full rounded-2xl border-2 bg-white p-4 text-left transition-colors hover:bg-slate-50 ${f.picked ? "border-resq-red" : "border-slate-100"}`}>
       <div className="flex flex-wrap items-center gap-1.5">
         {t && <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase ${URGENCY_STYLE[t.urgency]}`}>{t.urgency}</span>}
-        <span className="font-display font-bold text-resq-navy">{t ? TYPE_LABELS[t.type] : "Emergency"}</span>
+        <span className="font-display font-bold text-resq-navy">{requestTitle(r)}</span>
+        <FeeChip r={r} />
         {f.picked && left > 0 && <Badge variant="emergency">You were picked · {left}s</Badge>}
         {r.status === "escalated" && <Badge variant="warning">No one yet</Badge>}
         <span className="ml-auto text-xs text-resq-slate">{fmtTime(r.createdAt)}</span>
@@ -404,6 +510,7 @@ function FeedCard({ f, onOpen }: { f: FeedItem; onOpen: () => void }) {
 
 function RequestSheet({ f, me, onClose, onAccept, onDecline }: { f: FeedItem; me: Helper; onClose: () => void; onAccept: () => void; onDecline: () => void }) {
   const r = f.request, t = r.triage;
+  const gig = categoryOf(r) === "HOUSEHOLD_MICROGIG", allowed = canAccept(me, r);
   const [busy, setBusy] = useState(false);
   const markers: MapMarker[] = [];
   if (r.location) markers.push({ id: "r", at: r.location, color: "#DC2626", kind: "target", label: "Help" });
@@ -411,18 +518,27 @@ function RequestSheet({ f, me, onClose, onAccept, onDecline }: { f: FeedItem; me
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-resq-navy-dark/60 backdrop-blur-sm md:items-center" role="dialog" aria-modal="true" aria-labelledby="req-title" onClick={onClose}>
       <div className="animate-slide-up max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white shadow-2xl md:rounded-3xl" onClick={(e) => e.stopPropagation()}>
-        <div className="bg-emergency-gradient px-5 py-4 text-white">
+        <div className={`${gig ? "bg-navy-gradient" : "bg-emergency-gradient"} px-5 py-4 text-white`}>
           <div className="flex items-start justify-between">
             <div>
-              {t && <span className="rounded-md bg-white/20 px-1.5 py-0.5 text-[10px] font-bold uppercase">{t.urgency}</span>}
-              <h2 id="req-title" className="mt-1 font-display text-2xl font-bold">{t ? TYPE_LABELS[t.type] : "Emergency"}</h2>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {t && <span className="rounded-md bg-white/20 px-1.5 py-0.5 text-[10px] font-bold uppercase">{t.urgency}</span>}
+                <span className="rounded-md bg-white/20 px-1.5 py-0.5 text-[10px] font-bold uppercase">{gig ? `Paid callout · ${formatMoney(feeOf(r))}` : "Free · emergency"}</span>
+              </div>
+              <h2 id="req-title" className="mt-1 font-display text-2xl font-bold">{requestTitle(r)}</h2>
               <p className="text-sm text-white/80">{fmtDistance(f.distanceKm)} from you · asked at {fmtTime(r.createdAt)}</p>
             </div>
             <button onClick={onClose} aria-label="Close" className="flex h-10 w-10 items-center justify-center rounded-xl hover:bg-white/15"><Icon.X size={18} /></button>
           </div>
         </div>
         <div className="space-y-4 p-5">
-          <p className="rounded-xl bg-resq-red-light p-3 text-sm text-resq-red-dark">“{r.description}”</p>
+          <p className={`rounded-xl p-3 text-sm ${gig ? "bg-slate-100 text-resq-navy" : "bg-resq-red-light text-resq-red-dark"}`}>“{r.description}”</p>
+          {gig && (
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+              <div><p className="text-xs font-bold uppercase tracking-wider text-blue-700">Callout fee · held in escrow</p><p className="text-sm text-resq-navy">Paid when you mark the job done</p></div>
+              <p className="font-mono text-2xl font-bold text-blue-700">{formatMoney(feeOf(r))}</p>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="font-semibold text-resq-slate">Needs your:</span>
             {f.matchedSkills.map((s) => <SkillPill key={s} skill={s} />)}{f.matchedEquipment.map((e) => <EquipmentPill key={e} item={e} />)}
@@ -434,8 +550,9 @@ function RequestSheet({ f, me, onClose, onAccept, onDecline }: { f: FeedItem; me
             </div>
           )}
           <p className="text-xs text-resq-slate">If you accept, {r.requesterName ?? "they"} will see your name, phone, skills and equipment, and you&apos;ll be guided to their location.</p>
+          {!allowed && <p role="note" className="rounded-xl bg-amber-50 p-3 text-sm font-medium text-amber-800">Only Certified Pros can accept paid household jobs. You can add that badge in your profile.</p>}
           <div className="grid grid-cols-2 gap-3">
-            <button disabled={busy} onClick={() => { setBusy(true); onAccept(); }} className="flex min-h-16 flex-col items-center justify-center rounded-2xl bg-success-gradient font-display text-lg font-bold text-white shadow-lg disabled:opacity-60"><Icon.Check size={22} />I&apos;ll help</button>
+            <button disabled={busy} onClick={() => { setBusy(true); onAccept(); }} className="flex min-h-16 flex-col items-center justify-center rounded-2xl bg-success-gradient font-display text-lg font-bold text-white shadow-lg disabled:opacity-60"><Icon.Check size={22} />{gig ? "Accept job" : "I'll help"}</button>
             <button disabled={busy} onClick={() => { setBusy(true); onDecline(); }} className="flex min-h-16 flex-col items-center justify-center rounded-2xl border-2 border-slate-200 font-display text-lg font-bold text-resq-slate disabled:opacity-60"><Icon.X size={22} />Not now</button>
           </div>
         </div>
@@ -446,65 +563,218 @@ function RequestSheet({ f, me, onClose, onAccept, onDecline }: { f: FeedItem; me
 
 // ─── Ask for help (minimal: the profile supplies the rest) ─────────────────────────────────────────────────
 
+const AUTO_SEND_S = 3; // hands-free voice: seconds the preview stays up before the request sends itself
+type VoiceState =
+  | { phase: "triaging"; transcript: string }
+  | { phase: "preview"; transcript: string; triage: TriageResult | null; note: string | null };
+
 function AskForm({ me, center, onBack, onCreated }: { me: Helper; center: LatLng; onBack: () => void; onCreated: (id: string) => void }) {
+  const [category, setCategory] = useState<RequestCategory>("LIFE_SAFETY");
+  const [gigType, setGigType] = useState<GigType | null>(null);
+  const [fee, setFee] = useState<number>(CALLOUT_FEES[1]);
   const [text, setText] = useState("");
   const [tile, setTile] = useState<string | null>(null);
   const [role, setRole] = useState<RequesterRole>("self");
   const [loc, setLoc] = useState<{ at: LatLng; source: "gps" | "demo" } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const speech = useSpeech(setText);
+  const [voice, setVoice] = useState<VoiceState | null>(null);
+  const [count, setCount] = useState<number | null>(null); // seconds until the spoken request sends itself; null = no auto-send
+  const voiceRun = useRef(0); // bumping it discards a triage preview that was cancelled or superseded
+  const gig = category === "HOUSEHOLD_MICROGIG";
+  const categoryNow = useRef(category);
+  categoryNow.current = category;
   useEffect(() => { void whereAmI(center).then(setLoc); }, [center]);
 
-  const submit = async () => {
+  const description = (): string => {
+    if (gig) { const g = gigType ? GIG_TYPES[gigType] : null; return text.trim() || (g ? `${g.label}: ${g.sub}` : ""); }
     const t = EMERGENCY_TILES.find((x) => x.id === tile);
-    const description = [t && !text.toLowerCase().includes(t.label.toLowerCase()) ? t.hint : "", text.trim() || (t ? t.sub : "")].filter(Boolean).join(" ").trim();
-    if (!description) { setError("Tell us what is happening, or pick a type."); return; }
-    setBusy(true); setError(null);
-    const r = await api<RequestView>("/api/requests", { body: { description, role, location: loc?.at ?? me.location ?? null } });
-    setBusy(false);
-    if (r.ok) onCreated(r.data.request.id); else setError(`Could not send (${r.error}). Call 112.`);
+    return [t && !text.toLowerCase().includes(t.label.toLowerCase()) ? t.hint : "", text.trim() || (t ? t.sub : "")].filter(Boolean).join(" ").trim();
   };
-  if (busy) return <Triaging text={text || EMERGENCY_TILES.find((x) => x.id === tile)?.sub || ""} />;
+
+  const submit = async () => {
+    setCount(null);
+    if (gig && !gigType) { setError("Pick the kind of job first."); return; }
+    const d = description();
+    if (!d) { setError(gig ? "Tell us what needs fixing." : "Tell us what is happening, or pick a type."); return; }
+    setBusy(true); setError(null);
+    const r = await api<RequestView>("/api/requests", {
+      body: { description: d, role: gig ? "self" : role, location: loc?.at ?? me.location ?? null, category, ...(gig ? { gigType, calloutFee: fee } : {}) },
+    });
+    setBusy(false);
+    if (r.ok) onCreated(r.data.request.id);
+    else setError(gig ? `Could not post the job (${r.error.replace(/_/g, " ")}). If someone is in danger, switch to Emergency or call 112.` : `Could not send (${r.error}). Call 112.`);
+  };
+  const submitNow = useRef(submit);
+  submitNow.current = submit;
+
+  // Hands-free voice: final transcript → POST /api/triage (no typing, no extra tap) → preview → auto-send after 3 s.
+  const onFinal = async (transcript: string) => {
+    const run = ++voiceRun.current;
+    setText(transcript); setError(null); setCount(null);
+    setVoice({ phase: "triaging", transcript });
+    const r = await api<TriageResult>("/api/triage", { body: { text: transcript } });
+    if (voiceRun.current !== run) return;
+    const triage = r.ok ? r.data : null;
+    const paidMode = categoryNow.current === "HOUSEHOLD_MICROGIG";
+    // Nobody pays for an emergency: a spoken "repair" that is really someone in danger is sent free, at once.
+    const emergency = !paidMode || mustBeLifeSafety({ type: triage?.type ?? "other" }, transcript);
+    if (paidMode && emergency) setCategory("LIFE_SAFETY");
+    setVoice({
+      phase: "preview", transcript, triage,
+      note: paidMode && emergency ? "This sounds like an emergency, so it is free. Sending it to nearby helpers now."
+        : paidMode ? "Check the job type and callout fee, then tap Post job. Paid jobs are never posted without your tap."
+        : triage ? null : "Could not preview the AI result. Your request will still be understood when it is sent.",
+    });
+    if (emergency) setCount(AUTO_SEND_S);
+  };
+  const speech = useSpeech({
+    onText: (t) => { setText(t); setError(null); },
+    onFinal: (t) => void onFinal(t),
+    onError: (e) => setError(speechErrorText(e)),
+  });
+  useEffect(() => {
+    if (count === null) return;
+    if (count <= 0) { setCount(null); void submitNow.current(); return; }
+    const t = setTimeout(() => setCount((c) => (c === null ? null : c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [count]);
+
+  const cancelAuto = () => { setCount(null); setVoice((v) => (v?.phase === "preview" ? { ...v, note: "Auto-send cancelled. Edit the text, or tap the button below when you are ready." } : v)); };
+  const dropVoice = () => { voiceRun.current++; setCount(null); setVoice(null); };
+  const toggleMic = () => { dropVoice(); setError(null); speech.toggle(); };
+  const pickCategory = (c: RequestCategory) => { if (c !== category) { dropVoice(); setError(null); setCategory(c); } };
+
+  if (busy) return <Triaging text={description()} />;
 
   const p = me.profile;
+  const ready = gig ? gigType !== null : !!text.trim() || !!tile;
+  const vt = voice?.phase === "preview" ? voice.triage : null;
+  const hazard = vt?.hazardAlert?.hasHazard ? vt.hazardAlert : null; // curated server text (lib/hazards.ts), never the model's words
+  const showTriage = vt !== null && !gig; // a paid job gets its skills and urgency from the job type, not from the AI preview
+  const chip = (on: boolean) => `min-h-12 rounded-xl border-2 px-3 text-sm font-semibold ${on ? "border-resq-navy bg-resq-navy text-white" : "border-slate-200 bg-white text-resq-navy"}`;
   return (
     <>
-      <div className="bg-emergency-gradient">
+      <div className={gig ? "bg-navy-gradient" : "bg-emergency-gradient"}>
         <Container><NavBar title="Ask for help" onBack={onBack} light /></Container>
-        <p className="mx-auto max-w-3xl px-5 pb-5 text-sm text-white/85">Just say what&apos;s wrong. Nearby people with the right skills or equipment are alerted at once.</p>
+        <p className="mx-auto max-w-3xl px-5 pb-5 text-sm text-white/85">{gig
+          ? "Book a Certified Pro near you for a household repair. Emergencies are always free."
+          : "Just say what's wrong. Nearby people with the right skills or equipment are alerted at once."}</p>
       </div>
       <main className="mx-auto w-full max-w-3xl flex-1 px-5 py-4">
-        <label htmlFor="what" className="mb-1.5 block font-display text-lg font-bold text-resq-navy">What&apos;s happening?</label>
-        <div className="relative">
-          <textarea id="what" value={text} onChange={(e) => setText(e.target.value)} maxLength={1000} rows={3} autoFocus
-            placeholder="e.g. My father collapsed and is not breathing" className="card-shadow w-full rounded-2xl border border-slate-200 bg-white p-4 pr-16 text-base text-resq-navy outline-none focus:ring-2 focus:ring-resq-red/30" />
-          {speech.supported && (
-            <button aria-label="Hold to speak" onPointerDown={(e) => { e.preventDefault(); speech.start(); }} onPointerUp={speech.stop} onPointerLeave={() => speech.listening && speech.stop()}
-              className={`absolute bottom-3 right-3 flex h-12 w-12 touch-none items-center justify-center rounded-xl text-white ${speech.listening ? "scale-110 bg-resq-red" : "bg-resq-navy"}`}>
-              <Icon.Mic size={20} />
-            </button>
-          )}
-        </div>
-        {speech.supported && <p className="mt-1 text-xs text-resq-slate">{speech.listening ? "Listening… release to stop" : "Hold the mic button to speak instead of typing."}</p>}
-
-        <p className="mb-2 mt-4 text-sm font-semibold text-resq-navy">Quick pick <span className="font-normal text-resq-slate">(optional)</span></p>
-        <div className="flex flex-wrap gap-2">
-          {EMERGENCY_TILES.map((t) => (
-            <button key={t.id} onClick={() => setTile(tile === t.id ? null : t.id)} aria-pressed={tile === t.id}
-              className={`flex min-h-11 items-center gap-1.5 rounded-xl border-2 px-3 text-sm font-semibold ${tile === t.id ? "border-resq-red bg-resq-red-light text-resq-red" : "border-slate-200 bg-white text-resq-navy"}`}>
-              <span style={{ color: t.color }} className="[&_svg]:h-4 [&_svg]:w-4">{t.icon}</span>{t.label}
+        <div role="radiogroup" aria-label="What kind of help do you need?" className="mb-4 grid grid-cols-2 gap-2">
+          {([["LIFE_SAFETY", "Emergency", "Free", <Icon.AlertTriangle key="i" size={18} />, "border-resq-red bg-resq-red-light text-resq-red"],
+            ["HOUSEHOLD_MICROGIG", "Household repair", "Paid callout", <Icon.Zap key="i" size={18} />, "border-blue-600 bg-blue-50 text-blue-700"]] as const).map(([c, label, sub, icon, onCls]) => (
+            <button key={c} type="button" role="radio" aria-checked={category === c} onClick={() => pickCategory(c)}
+              className={`flex min-h-14 items-center gap-2 rounded-2xl border-2 px-3 py-2 text-left ${category === c ? `${onCls} shadow-md` : "border-slate-200 bg-white text-resq-slate"}`}>
+              <span className="flex-shrink-0">{icon}</span>
+              <span className="flex min-w-0 flex-col leading-tight sm:flex-row sm:items-baseline sm:gap-1">
+                <span className="font-display text-sm font-bold">{label}</span><span className="hidden sm:inline" aria-hidden> · </span><span className="text-xs font-semibold opacity-80">{sub}</span>
+              </span>
             </button>
           ))}
         </div>
 
-        <p className="mb-2 mt-4 text-sm font-semibold text-resq-navy">Who needs help?</p>
-        <div className="grid grid-cols-2 gap-2">
-          {([["self", "Me"], ["other", "Someone with me"]] as const).map(([v, label]) => (
-            <button key={v} onClick={() => setRole(v)} aria-pressed={role === v}
-              className={`min-h-12 rounded-xl border-2 text-sm font-semibold ${role === v ? "border-resq-navy bg-resq-navy text-white" : "border-slate-200 bg-white text-resq-navy"}`}>{label}</button>
-          ))}
+        <label htmlFor="what" className="mb-1.5 block font-display text-lg font-bold text-resq-navy">{gig ? "What needs fixing?" : "What's happening?"}</label>
+        <div className="flex items-center gap-3">
+          <textarea id="what" value={text} onChange={(e) => { setText(e.target.value); if (count !== null) cancelAuto(); }} maxLength={1000} rows={3} autoFocus
+            placeholder={gig ? "e.g. Kitchen tap is leaking and won't shut off" : "e.g. My father collapsed and is not breathing"}
+            className={`card-shadow min-w-0 flex-1 rounded-2xl border bg-white p-4 text-base text-resq-navy outline-none focus:ring-2 focus:ring-resq-red/30 ${speech.listening ? "border-resq-red ring-2 ring-resq-red/30" : "border-slate-200"}`} />
+          {speech.supported && <VoiceMic listening={speech.listening} onToggle={toggleMic} />}
         </div>
+        {speech.supported && (
+          <p className="mt-1.5 text-xs text-resq-slate" aria-live="polite">{speech.listening
+            ? <span className="font-semibold text-resq-red">Listening… speak now. It is sent when you stop talking.</span>
+            : "Hands-free: tap the mic and say what's wrong. No typing needed."}</p>
+        )}
+
+        {voice && (
+          <section aria-label="What ResQ understood" aria-live="polite" className="card-shadow-lg animate-slide-up mt-3 overflow-hidden rounded-2xl border border-slate-100 bg-white">
+            <div className="flex items-center gap-2 bg-ai-gradient px-4 py-2 text-white">
+              <Icon.Activity size={16} /><p className="text-xs font-semibold">ResQ AI · heard you</p>
+              {vt && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-white/80">{vt.source === "ollama" ? "On-device AI" : "Keyword rules"}</span>}
+            </div>
+            <div className="space-y-3 p-4">
+              <p className="text-sm italic text-resq-slate">“{voice.transcript}”</p>
+              {voice.phase === "triaging" ? (
+                <div className="flex items-center gap-2 text-sm text-resq-slate"><TypingDots />Understanding what you said…</div>
+              ) : (
+                <>
+                  {showTriage && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase ${URGENCY_STYLE[vt.urgency]}`}>{vt.urgency}</span>
+                      <span className="font-display text-lg font-bold text-resq-navy">{TYPE_LABELS[vt.type]}</span>
+                    </div>
+                  )}
+                  {gig && <p className="font-display text-lg font-bold text-resq-navy">Sounds like a household repair</p>}
+                  {showTriage && (vt.skills ?? []).length + (vt.equipment ?? []).length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="font-semibold text-resq-slate">Alerting people with:</span>
+                      {(vt.skills ?? []).map((s) => <SkillPill key={s} skill={s} />)}{(vt.equipment ?? []).map((e) => <EquipmentPill key={e} item={e} />)}
+                    </div>
+                  )}
+                  {hazard && (
+                    <div role="alert" className="flex items-start gap-2 rounded-xl border-2 border-amber-400 bg-amber-50 p-3">
+                      <Icon.AlertTriangle size={18} className="mt-0.5 flex-shrink-0 animate-pulse text-resq-red" />
+                      <div><p className="text-xs font-extrabold tracking-wide text-resq-red-dark">{hazard.hazardTitle}</p><p className="mt-0.5 text-xs text-amber-900">{hazard.hazardAction}</p></div>
+                    </div>
+                  )}
+                  {voice.note && <p className="text-xs font-medium text-resq-slate">{voice.note}</p>}
+                  {count !== null && (
+                    <div className="flex items-center gap-3 rounded-xl bg-resq-red-light p-3">
+                      <div role="timer" aria-label={`Sending in ${count} seconds`} className="flex h-12 w-12 flex-shrink-0 animate-pulse items-center justify-center rounded-full bg-resq-red font-mono text-xl font-bold text-white">{count}</div>
+                      <p className="min-w-0 flex-1 text-sm font-semibold text-resq-red-dark">Sending for help in {count} s…</p>
+                      <button type="button" onClick={cancelAuto} className="min-h-12 flex-shrink-0 rounded-xl border-2 border-resq-red bg-white px-4 text-sm font-bold text-resq-red">Cancel</button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </section>
+        )}
+
+        {gig ? (
+          <>
+            <p className="mb-2 mt-4 text-sm font-semibold text-resq-navy">Kind of job</p>
+            <div role="radiogroup" aria-label="Kind of job" className="grid grid-cols-2 gap-2">
+              {(Object.keys(GIG_TYPES) as GigType[]).map((g) => (
+                <button key={g} type="button" role="radio" aria-checked={gigType === g} onClick={() => { setGigType(g); setError(null); }}
+                  className={`flex min-h-14 flex-col justify-center rounded-xl border-2 px-3 py-2 text-left ${gigType === g ? "border-blue-600 bg-blue-50" : "border-slate-200 bg-white"}`}>
+                  <span className={`text-sm font-bold ${gigType === g ? "text-blue-700" : "text-resq-navy"}`}>{GIG_TYPES[g].label}</span>
+                  <span className="text-xs leading-snug text-resq-slate">{GIG_TYPES[g].sub}</span>
+                </button>
+              ))}
+            </div>
+            <p className="mb-2 mt-4 text-sm font-semibold text-resq-navy">Callout fee <span className="font-normal text-resq-slate">(you choose, paid upfront into escrow)</span></p>
+            <div role="radiogroup" aria-label="Callout fee" className="grid grid-cols-3 gap-2">
+              {CALLOUT_FEES.map((f) => (
+                <button key={f} type="button" role="radio" aria-checked={fee === f} onClick={() => setFee(f)} className={`${chip(fee === f)} font-mono text-base`}>{formatMoney(f)}</button>
+              ))}
+            </div>
+            <p className="mt-2 flex items-start gap-1.5 rounded-xl bg-blue-50 p-3 text-xs leading-relaxed text-blue-900">
+              <Icon.Shield size={14} className="mt-0.5 flex-shrink-0" />Held in escrow (demo wallet, no real payment) and released to the pro when the job is marked done. Only Certified Pros can accept. If this turns out to be an emergency, it becomes free.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mb-2 mt-4 text-sm font-semibold text-resq-navy">Quick pick <span className="font-normal text-resq-slate">(optional)</span></p>
+            <div className="flex flex-wrap gap-2">
+              {EMERGENCY_TILES.map((t) => (
+                <button key={t.id} onClick={() => setTile(tile === t.id ? null : t.id)} aria-pressed={tile === t.id}
+                  className={`flex min-h-12 items-center gap-1.5 rounded-xl border-2 px-3 text-sm font-semibold ${tile === t.id ? "border-resq-red bg-resq-red-light text-resq-red" : "border-slate-200 bg-white text-resq-navy"}`}>
+                  <span style={{ color: t.color }} className="[&_svg]:h-4 [&_svg]:w-4">{t.icon}</span>{t.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="mb-2 mt-4 text-sm font-semibold text-resq-navy">Who needs help?</p>
+            <div className="grid grid-cols-2 gap-2">
+              {([["self", "Me"], ["other", "Someone with me"]] as const).map(([v, label]) => (
+                <button key={v} onClick={() => setRole(v)} aria-pressed={role === v} className={chip(role === v)}>{label}</button>
+              ))}
+            </div>
+          </>
+        )}
 
         <div className="mt-4 rounded-2xl bg-slate-100 p-3 text-xs text-resq-slate">
           <p className="font-semibold text-resq-navy">Sent automatically from your profile</p>
@@ -512,9 +782,9 @@ function AskForm({ me, center, onBack, onCreated }: { me: Helper; center: LatLng
           <p className="mt-1 flex items-center gap-1"><Icon.MapPin size={12} />{loc ? (loc.source === "gps" ? "Your GPS location" : "Demo location near TKMCE (GPS not in the demo area)") : "Getting your location…"}</p>
         </div>
         {error && <p role="alert" className="mt-3 rounded-xl bg-resq-red-light p-3 text-sm font-medium text-resq-red">{error}</p>}
-        <button onClick={submit} disabled={!text.trim() && !tile}
-          className={`mt-4 min-h-16 w-full rounded-2xl font-display text-xl font-bold ${text.trim() || tile ? "bg-resq-red text-white shadow-lg" : "cursor-not-allowed bg-slate-200 text-slate-400"}`}>
-          Send for help
+        <button onClick={() => void submit()} disabled={!ready}
+          className={`mt-4 min-h-16 w-full rounded-2xl font-display text-xl font-bold ${!ready ? "cursor-not-allowed bg-slate-200 text-slate-400" : gig ? "bg-blue-600 text-white shadow-lg" : "bg-resq-red text-white shadow-lg"}`}>
+          {gig ? `Post job · ${formatMoney(fee)}` : "Send for help"}
         </button>
       </main>
       <Call112Bar />

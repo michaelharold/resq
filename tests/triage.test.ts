@@ -3,14 +3,18 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  OLLAMA_NUM_PREDICT,
   isTriageOutput,
   normalizeTriageOutput,
+  readModelHazard,
+  mergeEquipment,
   applyUrgencyFloor,
   triage,
   triageSchema,
   buildSystemPrompt,
 } from "../lib/triage";
-import { NEED_TYPES, SKILLS, TYPE_SKILLS } from "../lib/taxonomy";
+import { EQUIPMENT, NEED_TYPES, SKILLS, TYPE_SKILLS } from "../lib/taxonomy";
+import { HAZARDS, HAZARD_KINDS, NO_HAZARD } from "../lib/hazards";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -132,23 +136,114 @@ test("normalizeTriageOutput truncates summary / falls back to input text", () =>
   assert.equal(normalizeTriageOutput({ ...base, summary: 12 } as never, "short text").summary, "short text");
 });
 
-test("triageSchema is built from the taxonomy", () => {
+test("triageSchema is built from the taxonomy and forces equipment + hazardAlert", () => {
   const schema = triageSchema() as {
     required: string[];
-    properties: { type: { enum: string[] }; urgency: { enum: string[] }; skills: { items: { enum: string[] } } };
+    properties: {
+      type: { enum: string[] };
+      urgency: { enum: string[] };
+      skills: { items: { enum: string[] } };
+      equipment: { type: string; items: { enum: string[] } };
+      hazardAlert: { type: string; required: string[]; properties: Record<string, { type: string; enum?: string[] }> };
+    };
   };
-  assert.deepEqual([...schema.required].sort(), ["confidence", "skills", "summary", "type", "urgency"]);
+  assert.deepEqual([...schema.required].sort(), ["confidence", "equipment", "hazardAlert", "skills", "summary", "type", "urgency"]);
   assert.deepEqual(schema.properties.type.enum, [...NEED_TYPES]);
   assert.deepEqual(schema.properties.skills.items.enum, [...SKILLS]);
   assert.deepEqual(schema.properties.urgency.enum, ["critical", "high", "medium", "low"]);
+  assert.equal(schema.properties.equipment.type, "array");
+  assert.deepEqual(schema.properties.equipment.items.enum, [...EQUIPMENT]);
+  const hz = schema.properties.hazardAlert;
+  assert.equal(hz.type, "object");
+  assert.deepEqual([...hz.required].sort(), ["hasHazard", "hazardKind"]);
+  assert.equal(hz.properties.hasHazard.type, "boolean");
+  assert.deepEqual(hz.properties.hazardKind.enum, [...HAZARD_KINDS]);
+  // Latency decision (lib/triage.ts header): the model classifies the kind only; the words are curated.
+  assert.equal("hazardTitle" in hz.properties, false);
+  assert.equal("hazardAction" in hz.properties, false);
 });
 
-test("buildSystemPrompt lists every type and skill", () => {
+test("buildSystemPrompt lists every type, skill, equipment and hazard kind", () => {
   const p = buildSystemPrompt();
   for (const t of NEED_TYPES) assert.ok(p.includes(t), `prompt lacks ${t}`);
   for (const s of SKILLS) assert.ok(p.includes(s), `prompt lacks ${s}`);
-  assert.ok(/JSON only/i.test(p));
+  for (const e of EQUIPMENT) assert.ok(p.includes(e), `prompt lacks ${e}`);
+  for (const k of HAZARD_KINDS) assert.ok(p.includes(`- ${k}: `), `prompt lacks hazard kind ${k}`);
+  assert.ok(/JSON/.test(p));
+  assert.ok(/HIDDEN ENVIRONMENTAL HAZARD/.test(p));
+  assert.ok(p.includes("hazardAlert"));
   assert.ok(p.includes("evacuation_mobility when"));
+  // The model is never asked to word the warning.
+  assert.equal(p.includes("hazardTitle"), false);
+  assert.equal(p.includes("hazardAction"), false);
+});
+
+// ---------------------------------------------------------------------------
+// hazardAlert + equipment normalisation (docs/UPGRADE.md §2, §5)
+// ---------------------------------------------------------------------------
+
+const MODEL_TEXT = "MODEL TEXT";
+
+test("readModelHazard keeps only the classification", () => {
+  assert.deepEqual(readModelHazard({ hasHazard: true, hazardKind: "gas_leak", hazardTitle: MODEL_TEXT, hazardAction: MODEL_TEXT }), { hasHazard: true, kind: "gas_leak" });
+  assert.deepEqual(readModelHazard({ hasHazard: "true", kind: "animal" }), { hasHazard: true, kind: "animal" }); // format:"json" fallback spellings
+  assert.deepEqual(readModelHazard({ hasHazard: false, hazardKind: "gas_leak" }), { hasHazard: false, kind: "none" });
+  assert.deepEqual(readModelHazard({ hasHazard: true, hazardKind: "volcano" }), { hasHazard: true, kind: "other" });
+  assert.deepEqual(readModelHazard({ hasHazard: true, hazardKind: "none" }), { hasHazard: true, kind: "other" });
+  assert.deepEqual(readModelHazard({ hasHazard: true }), { hasHazard: true, kind: "other" });
+  for (const garbage of [undefined, null, "gas_leak", 7, true, [], ["gas_leak"], { hasHazard: 1, hazardKind: "gas_leak" }]) {
+    assert.deepEqual(readModelHazard(garbage), { hasHazard: false, kind: "none" }, JSON.stringify(garbage));
+  }
+});
+
+test("mergeEquipment: rules first, valid model extras, deduped, max 4", () => {
+  assert.deepEqual(mergeEquipment(["water_pump"], ["oxygen_cylinder", "bogus", "oxygen_cylinder", "water_pump", 3, "car", "torch_powerbank", "life_jacket"]), [
+    "water_pump",
+    "oxygen_cylinder",
+    "car",
+    "torch_powerbank",
+  ]);
+  assert.deepEqual(mergeEquipment([], "water_pump"), []);
+  assert.deepEqual(mergeEquipment([], undefined), []);
+  assert.deepEqual(mergeEquipment(["car", "car"], null), ["car"]);
+});
+
+test("normalizeTriageOutput: model hazard kind → curated text, never the model's words", () => {
+  const out = normalizeTriageOutput(
+    { type: "fire", urgency: "high", hazardAlert: { hasHazard: true, hazardKind: "gas_leak", hazardTitle: MODEL_TEXT, hazardAction: MODEL_TEXT } } as never,
+    "something smells odd in the kitchen", // no keyword rule fires, so the model's kind is used
+  );
+  assert.deepEqual(out.hazardAlert, { hasHazard: true, kind: "gas_leak", hazardTitle: HAZARDS.gas_leak.title, hazardAction: HAZARDS.gas_leak.action });
+  assert.equal(JSON.stringify(out).includes(MODEL_TEXT), false);
+});
+
+test("normalizeTriageOutput: garbage hazardAlert → no hazard; unknown kind → other", () => {
+  const base = { type: "bleeding", urgency: "high" } as const;
+  for (const garbage of [undefined, null, "yes", 1, [], { hasHazard: "maybe" }]) {
+    assert.deepEqual(normalizeTriageOutput({ ...base, hazardAlert: garbage } as never, "deep cut on the hand").hazardAlert, NO_HAZARD, JSON.stringify(garbage));
+  }
+  const other = normalizeTriageOutput({ ...base, hazardAlert: { hasHazard: true, hazardKind: "lava" } } as never, "deep cut on the hand").hazardAlert;
+  assert.deepEqual(other, { hasHazard: true, kind: "other", hazardTitle: HAZARDS.other.title, hazardAction: HAZARDS.other.action });
+});
+
+test("normalizeTriageOutput: keyword rules beat the model on the hazard kind", () => {
+  const out = normalizeTriageOutput(
+    { type: "flood_rescue", urgency: "critical", hazardAlert: { hasHazard: true, hazardKind: "animal", hazardTitle: MODEL_TEXT, hazardAction: MODEL_TEXT } } as never,
+    "Basement flooded, need pump",
+  );
+  assert.equal(out.hazardAlert.kind, "electrocution");
+  assert.equal(out.hazardAlert.hazardTitle, HAZARDS.electrocution.title);
+  const denied = normalizeTriageOutput({ type: "flood_rescue", urgency: "critical", hazardAlert: { hasHazard: false, hazardKind: "none" } } as never, "Basement flooded, need pump");
+  assert.equal(denied.hazardAlert.kind, "electrocution"); // the model saying "no hazard" cannot switch the rules off
+});
+
+test("normalizeTriageOutput: equipment = rules ∪ model, deduped, max 4", () => {
+  const base = { type: "flood_rescue", urgency: "critical" } as const;
+  assert.deepEqual(normalizeTriageOutput({ ...base, equipment: ["life_jacket", "water_pump", "nope", "life_jacket"] } as never, "Basement flooded, need pump").equipment, ["water_pump", "life_jacket"]);
+  assert.deepEqual(normalizeTriageOutput({ ...base } as never, "Basement flooded, need pump").equipment, ["water_pump"]);
+  assert.deepEqual(normalizeTriageOutput({ ...base, equipment: "water_pump" } as never, "help").equipment, []);
+  const many = normalizeTriageOutput({ ...base, equipment: ["oxygen_cylinder", "car", "torch_powerbank", "life_jacket", "first_aid_kit"] } as never, "need pump");
+  assert.deepEqual(many.equipment, ["water_pump", "oxygen_cylinder", "car", "torch_powerbank"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -195,13 +290,18 @@ test("triage() returns source ollama for a valid fake response", async () => {
       assert.equal(r.summary, "x");
       assert.equal(r.confidence, 0.9);
       assert.equal(r.clarifyingQuestion, null);
+      assert.deepEqual(r.equipment, []); // GOOD_OUTPUT has no equipment/hazardAlert: lenient
+      assert.deepEqual(r.hazardAlert, NO_HAZARD);
     });
     assert.equal(seen.length, 1);
     assert.equal(seen[0].model, "fake-model");
     assert.equal(seen[0].stream, false);
     assert.equal(seen[0].keep_alive, "30m");
     assert.equal(typeof seen[0].format, "object");
-    assert.deepEqual(seen[0].options, { temperature: 0, num_predict: 200 });
+    assert.deepEqual(seen[0].options, { temperature: 0, num_predict: OLLAMA_NUM_PREDICT });
+    assert.ok(OLLAMA_NUM_PREDICT >= 200);
+    const fmt = seen[0].format as { required: string[] };
+    assert.ok(fmt.required.includes("hazardAlert") && fmt.required.includes("equipment"));
   } finally {
     await closeServer(server);
   }
@@ -326,4 +426,120 @@ test("triage() falls back to rules on a non-400 HTTP error", async () => {
   } finally {
     await closeServer(server);
   }
+});
+
+// ---------------------------------------------------------------------------
+// hazardAlert + equipment through triage() (fake Ollama, every merge branch)
+// ---------------------------------------------------------------------------
+
+const MODEL_HAZARD = { hasHazard: true, hazardKind: "gas_leak", hazardTitle: MODEL_TEXT, hazardAction: MODEL_TEXT };
+
+test("triage(): model hazard kind is shown with curated text; the model's words never reach the response", async () => {
+  const { server, url } = await startFake((_body, res) => {
+    sendJson(res, 200, { response: JSON.stringify({ type: "fire", urgency: "high", skills: ["volunteer"], equipment: ["fire_extinguisher"], summary: "x", confidence: 0.9, hazardAlert: MODEL_HAZARD }) });
+  });
+  try {
+    await withEnv({ OLLAMA_URL: url, OLLAMA_TIMEOUT_MS: "4000" }, async () => {
+      const r = await triage("something smells odd in the kitchen"); // no keyword hazard, weak type rules
+      assert.equal(r.source, "ollama");
+      assert.equal(r.type, "fire");
+      assert.deepEqual(r.hazardAlert, { hasHazard: true, kind: "gas_leak", hazardTitle: HAZARDS.gas_leak.title, hazardAction: HAZARDS.gas_leak.action });
+      assert.deepEqual(r.equipment, ["fire_extinguisher"]);
+      assert.equal(JSON.stringify(r).includes(MODEL_TEXT), false);
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("triage(): garbage hazardAlert from the model → no hazard, still source ollama", async () => {
+  const { server, url } = await startFake((_body, res) => {
+    sendJson(res, 200, { response: JSON.stringify({ ...GOOD_OUTPUT, hazardAlert: "DANGER!!!", equipment: "all of it" }) });
+  });
+  try {
+    await withEnv({ OLLAMA_URL: url, OLLAMA_TIMEOUT_MS: "4000" }, async () => {
+      const r = await triage("father collapsed not breathing");
+      assert.equal(r.source, "ollama");
+      assert.deepEqual(r.hazardAlert, NO_HAZARD);
+      assert.deepEqual(r.equipment, []);
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("triage(): keyword rules beat the model's hazard when they fire (agreeing types)", async () => {
+  const { server, url } = await startFake((_body, res) => {
+    sendJson(res, 200, {
+      response: JSON.stringify({ type: "flood_rescue", urgency: "high", skills: ["swimmer"], equipment: ["life_jacket"], summary: "x", confidence: 0.9, hazardAlert: { hasHazard: true, hazardKind: "animal" } }),
+    });
+  });
+  try {
+    await withEnv({ OLLAMA_URL: url, OLLAMA_TIMEOUT_MS: "4000" }, async () => {
+      const r = await triage("Basement flooded, need pump");
+      assert.equal(r.source, "ollama");
+      assert.equal(r.type, "flood_rescue");
+      assert.equal(r.hazardAlert.kind, "electrocution");
+      assert.equal(r.hazardAlert.hazardTitle, HAZARDS.electrocution.title);
+      assert.deepEqual(r.equipment, ["water_pump", "life_jacket"]); // rules first, model extra
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("triage(): when strong rules overrule the model's type, the model's hazard and equipment go too", async () => {
+  const { server, url } = await startFake((_body, res) => {
+    sendJson(res, 200, {
+      response: JSON.stringify({ type: "trapped_structural", urgency: "high", skills: ["volunteer"], equipment: ["chainsaw_cutter"], summary: "model summary", confidence: 0.9, hazardAlert: { hasHazard: true, hazardKind: "structural_collapse", hazardTitle: MODEL_TEXT } }),
+    });
+  });
+  try {
+    await withEnv({ OLLAMA_URL: url, OLLAMA_TIMEOUT_MS: "4000" }, async () => {
+      const r = await triage("my father collapsed, not breathing");
+      assert.equal(r.source, "rules");
+      assert.equal(r.type, "cardiac_no_breathing");
+      assert.equal(r.summary, "model summary");
+      assert.deepEqual(r.hazardAlert, NO_HAZARD); // no collapse banner on top of the CPR card
+      assert.deepEqual(r.equipment, []);
+      assert.equal(JSON.stringify(r).includes(MODEL_TEXT), false);
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("triage(): an unsure model (< 0.5) yields the rules result with rule hazard + equipment", async () => {
+  const { server, url } = await startFake((_body, res) => {
+    sendJson(res, 200, { response: JSON.stringify({ type: "other", urgency: "low", skills: [], equipment: ["car"], summary: "x", confidence: 0.2, hazardAlert: { hasHazard: true, hazardKind: "animal" } }) });
+  });
+  try {
+    await withEnv({ OLLAMA_URL: url, OLLAMA_TIMEOUT_MS: "4000" }, async () => {
+      const r = await triage("Basement flooded, need pump");
+      assert.equal(r.source, "rules");
+      assert.equal(r.hazardAlert.kind, "electrocution");
+      assert.deepEqual(r.equipment, ["water_pump"]);
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("triage(): rules fallback on a closed port still carries hazard + equipment", async () => {
+  await withEnv({ OLLAMA_URL: "http://127.0.0.1:9", OLLAMA_TIMEOUT_MS: "4000" }, async () => {
+    const r = await triage("smell of gas in the kitchen, bring a torch");
+    assert.equal(r.source, "rules");
+    assert.equal(r.hazardAlert.kind, "gas_leak");
+    assert.equal(r.hazardAlert.hazardAction, HAZARDS.gas_leak.action);
+    assert.deepEqual(r.equipment, ["torch_powerbank"]);
+  });
+});
+
+test("triage(): every demo phrase gets the contract's hazard from rules alone", async () => {
+  await withEnv({ OLLAMA_URL: "http://127.0.0.1:9", OLLAMA_TIMEOUT_MS: "4000" }, async () => {
+    assert.equal((await triage("Basement flooded, need pump")).hazardAlert.kind, "electrocution");
+    assert.equal((await triage("smell of gas in the kitchen")).hazardAlert.kind, "gas_leak");
+    assert.ok(["fast_water", "electrocution"].includes((await triage("house flooded, water rising fast outside")).hazardAlert.kind));
+    assert.equal((await triage("my father collapsed, not breathing")).hazardAlert.kind, "none");
+  });
 });

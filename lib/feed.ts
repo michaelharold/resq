@@ -1,12 +1,16 @@
 /**
  * The signed-in user's dashboard: their profile, their own open request, the job they accepted, and nearby open
  * requests that need their skills or equipment (full requester details, so they can decide).
+ * Upgrade: requests the user may not accept (paid micro-gigs without a Certified Pro badge) are hidden entirely;
+ * equipment matches use what triage says the situation calls for plus the usual kit for the need type; a paid
+ * micro-gig is only relevant to someone with the trade skill (owning a pump does not make you the plumber).
  */
 import { getStore } from "./store";
 import { haversineKm, waveWindowMs } from "./dispatch";
 import { mapsUrl } from "./sms";
 import { TYPE_EQUIPMENT } from "./taxonomy";
 import { hasDeclined } from "./waves";
+import { canAccept, categoryOf } from "./policy";
 import { buildHelperView } from "./views";
 import type { Equipment, Helper, HelperView, HelpRequest, Skill } from "./types";
 
@@ -34,13 +38,17 @@ export async function buildDashboard(helperId: string | null, phone: string): Pr
   for (const r of open) {
     if (r.status !== "searching" && r.status !== "escalated") continue;
     if (r.requesterHelperId === me.id || hasDeclined(r.id, me.id)) continue;
+    if (!canAccept(me, r)) continue; // not shown, not counted: they could not take it anyway
     const distanceKm = me.location && r.location ? +haversineKm(me.location, r.location).toFixed(2) : null;
     if (distanceKm !== null && distanceKm > FEED_RADIUS_KM) continue;
     const type = r.triage?.type ?? "other";
     const matchedSkills = (r.triage?.skills ?? []).filter((s) => me.skills.includes(s));
-    const matchedEquipment = TYPE_EQUIPMENT[type].filter((e) => (me.equipment ?? []).includes(e));
+    const gig = categoryOf(r) === "HOUSEHOLD_MICROGIG";
+    // A paid job lists only the tools of its trade; an emergency also lists the usual kit for its need type.
+    const wanted: Equipment[] = [...new Set([...(r.triage?.equipment ?? []), ...(gig ? [] : TYPE_EQUIPMENT[type])])];
+    const matchedEquipment = wanted.filter((e) => (me.equipment ?? []).includes(e));
     const ping = (await store.listDispatches(r.id)).find((d) => d.helperId === me.id && d.status === "pinged");
-    const relevant = matchedSkills.length > 0 || matchedEquipment.length > 0 || !!ping;
+    const relevant = matchedSkills.length > 0 || (!gig && matchedEquipment.length > 0) || !!ping;
     if (!relevant) { base.otherNearby++; continue; }
     base.feed.push({
       request: r, distanceKm, mapsUrl: r.location ? mapsUrl(r.location) : null, matchedSkills, matchedEquipment,

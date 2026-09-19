@@ -5,12 +5,20 @@ import { emit } from "@/lib/events";
 import { INITIAL_RELIABILITY } from "@/lib/dispatch";
 import { HELPER_SESSION_MAX_AGE_SEC, SESSION_COOKIE, isSecureRequest, serializeCookie, sign } from "@/lib/session";
 import { normalizePhone } from "@/lib/sms";
-import { equipmentOf, isLatLng, json, jsonError, profileOf, readJson, safe, skillsOrEmpty, text } from "@/lib/validate";
+import { equipmentOf, isLatLng, json, jsonError, profileOf, readJson, safe, skillsOrEmpty, text, trustOf } from "@/lib/validate";
+import { withHelperLock } from "@/lib/escrow";
+import { walletOf } from "@/lib/policy";
 import { onReject } from "@/lib/waves";
 import type { Helper } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * POST /api/helpers — create or update an account (self-service with a session, or any helper as ops).
+ * Upgrade fields: trustTier (TIER_1_NEIGHBOR default) and credentialId (3–40 chars, required for Tier 2 / Tier 3;
+ * self-declared in the demo, nothing is verified). Absent fields keep the stored values.
+ * walletBalance is NEVER read from the body, not even for ops: only an escrow release (lib/escrow.ts) credits it.
+ */
 export const POST = safe(async (req: Request) => {
   const ops = isOps(req);
   const s = getHelperSession(req);
@@ -43,17 +51,24 @@ export const POST = safe(async (req: Request) => {
   } else {
     existing = typeof b.id === "string" ? await store.getHelper(b.id) : await store.getHelperByPhone(phone);
   }
+  const trust = trustOf(b, existing);
+  if (!trust.ok) return jsonError(400, trust.error);
   const now = new Date().toISOString();
-  const helper = await store.upsertHelper({
-    id: existing?.id ?? (typeof b.id === "string" ? b.id : randomUUID()),
+  const id = existing?.id ?? (typeof b.id === "string" ? b.id : randomUUID());
+  // The wallet is re-read inside the helper lock, so a payout landing while this profile is being saved is not lost.
+  const helper = await withHelperLock(id, async () => store.upsertHelper({
+    id,
     name, phone, skills,
     location: isLatLng(b.location) ? b.location : b.location === null ? null : existing?.location ?? null,
     onDuty: typeof b.onDuty === "boolean" ? b.onDuty : existing?.onDuty ?? false,
     reliability: typeof b.reliability === "number" ? b.reliability : existing?.reliability ?? INITIAL_RELIABILITY,
     lastSeen: typeof b.lastSeen === "string" ? b.lastSeen : existing?.lastSeen ?? now,
     equipment: b.equipment === undefined ? existing?.equipment ?? [] : equipment,
+    trustTier: trust.value.trustTier,
+    credentialId: trust.value.credentialId,
+    walletBalance: walletOf(await store.getHelper(id)),
     ...(prof?.ok ? { profile: prof.value } : existing?.profile ? { profile: existing.profile } : {}),
-  });
+  }));
   emit("helper:updated", { helper });
   const headers: HeadersInit = {};
   let token: string | undefined;
