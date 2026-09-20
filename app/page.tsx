@@ -9,7 +9,6 @@
  * The money lives in components/PaymentPanel.tsx on both sides; this file only routes between screens and, when a
  * provider closes a job, repeats back the figures the server computed for the charge.
  */
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { Badge, Container, Logo, NavBar, PhoneShell, PulsingDot, initials } from "@/components/ui";
@@ -108,10 +107,6 @@ function AuthScreen({ onDone }: { onDone: () => void }) {
           <h2 className="font-display text-xl font-extrabold text-ink">Sign in or create your account</h2>
           <p className="mb-4 mt-1 text-sm text-mist">We&apos;ll text you a 6-digit code. New here? You&apos;ll set up your profile next.</p>
           <OtpForm onDone={() => onDone()} cta="Continue" />
-        </div>
-        <div className="flex gap-5 text-xs font-medium text-mist">
-          <Link href="/ops" className="underline underline-offset-2 hover:text-ink">Admin login</Link>
-          <Link href="/demo" className="underline underline-offset-2 hover:text-ink">Demo launcher</Link>
         </div>
       </Container>
     </div>
