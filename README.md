@@ -1,5 +1,7 @@
 # Sahaya — Trusted Help, Right Around You
 
+**Team Stochastic Thinkers · Kraft Night 2026 (IEDC TKMCE)**
+
 > A community marketplace for local trades: plumbers, electricians, carpenters, AC technicians, appliance
 > repairers, painters, cleaners and mechanics from your own neighbourhood. Like Uber, but for local professionals
 > and skilled neighbours, so they earn directly from their skills.
@@ -51,9 +53,13 @@ team accounts and an audit log.
 
 ## Screenshots
 
-| Home: services nearby | Booking: who will get it | AI job analysis | Worker's job brief |
+| Sign in | Home: every trade nearby | Booking: who will get it | AI job analysis |
 |---|---|---|---|
-| ![Home](docs/screenshots/home.png) | ![Booking](docs/screenshots/booking.png) | ![AI analysis](docs/screenshots/ai-analysis.png) | ![Job brief](docs/screenshots/job-brief.png) |
+| ![Sign in](docs/screenshots/01-signin.png) | ![Home](docs/screenshots/02-home.png) | ![Booking](docs/screenshots/04-booking.png) | ![AI analysis](docs/screenshots/05-ai-analysis.png) |
+
+The same app on a laptop — one column becomes two, the trade grid goes three-up:
+
+![Desktop](docs/screenshots/03-home-desktop.png)
 
 ## Tech stack
 
@@ -83,8 +89,8 @@ ollama --version    # https://ollama.com/download
 ### 2. Clone and install
 
 ```bash
-git clone https://github.com/michaelharold/resq.git
-cd resq
+git clone https://github.com/michaelharold/resq.git sahaya
+cd sahaya
 npm install
 ```
 
