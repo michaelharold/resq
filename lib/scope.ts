@@ -25,7 +25,7 @@ const LEVELS: SkillLevel[] = ["basic", "intermediate", "expert"];
 
 export function scopeSystemPrompt(): string {
   return [
-    "You are ResQ's job-scoping assistant for a local home-services and basic-care marketplace in Kerala, India.",
+    "You are Sahaya's job-scoping assistant for a local home-services and basic-care marketplace in Kerala, India.",
     "Read the customer's description and return ONLY one raw JSON object. No prose, no markdown, no code fences.",
     "Fields:",
     `- parsedTitle: short job title, max 60 characters.`,

@@ -1,4 +1,4 @@
-# ResQ — trusted local help, one tap away
+# Sahaya — Trusted Help, Right Around You
 
 > A community marketplace for local trades: plumbers, electricians, carpenters, AC technicians, appliance
 > repairers, painters, cleaners and mechanics from your own neighbourhood. Like Uber, but for local professionals
@@ -15,7 +15,7 @@ uncertain. You ask around, call numbers from old WhatsApp forwards, and hope. Yo
 right now**, **what they will charge**, or **whether they can be trusted**. Meanwhile the electrician two streets
 away has free hours and no simple way to find local work on his own terms.
 
-## What ResQ does
+## What Sahaya does
 
 **If you need help**
 1. Tap a service and see how many providers are nearby and their price ranges.
@@ -40,7 +40,7 @@ team accounts and an audit log.
 
 ## What makes it different
 
-| | Urban Company / Housejoy | JustDial / Sulekha | **ResQ** |
+| | Urban Company / Housejoy | JustDial / Sulekha | **Sahaya** |
 |---|---|---|---|
 | Who does the work | Company-curated staff | Lead lists | **Your own neighbours and local pros** |
 | Pricing | Fixed company menu | Unknown until you call | **Each provider's own range, shown upfront** |

@@ -141,7 +141,7 @@ export function CustomerReceiptCard({ requestId, r, workerName, busy, onDecide }
         </div>
         {r.note && <p className="rounded-xl bg-slate-50 p-3 text-sm text-resq-navy">“{r.note}”</p>}
         <ReceiptReading a={r.analysis} />
-        <p className="text-xs text-resq-slate">Approve and it is added to your total in full — ResQ takes no commission on parts. Decline and you pay only for the work.</p>
+        <p className="text-xs text-resq-slate">Approve and it is added to your total in full — Sahaya takes no commission on parts. Decline and you pay only for the work.</p>
         <div className="grid grid-cols-2 gap-2">
           <button disabled={busy} onClick={() => onDecide("approve")}
             className="flex min-h-14 items-center justify-center gap-2 rounded-2xl bg-success-gradient font-display font-bold text-white shadow disabled:opacity-60">

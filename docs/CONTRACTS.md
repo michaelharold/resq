@@ -1,4 +1,4 @@
-# ResQ — implementation contracts
+# Sahaya — implementation contracts
 
 This document pins down everything README.md leaves open so that independent people (or agents) can build
 separate files that fit together. README.md wins on any conflict; this file wins over any individual's taste.

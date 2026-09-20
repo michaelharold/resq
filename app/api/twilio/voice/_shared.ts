@@ -35,4 +35,4 @@ export function langParam(req: Request, fallback: LanguageCode = DEFAULT_LANGUAG
 
 /** What a caller hears when something on our side broke. Said in their language when we know it. */
 export const apology = (lang: LanguageCode) =>
-  xml(voiceXml(say("Sorry, ResQ could not take your message right now. Please try again in a minute.", lang), "<Hangup/>"));
+  xml(voiceXml(say("Sorry, Sahaya could not take your message right now. Please try again in a minute.", lang), "<Hangup/>"));

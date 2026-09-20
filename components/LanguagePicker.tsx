@@ -99,7 +99,7 @@ export function LanguageNote({ code }: { code: LanguageCode }) {
   return (
     <p className="mt-2 text-sm text-resq-slate">
       Messages from the other person are translated into <span className="font-semibold text-resq-navy">{l.endonym}</span>,
-      and ResQ calls you in {l.english}.
+      and Sahaya calls you in {l.english}.
     </p>
   );
 }

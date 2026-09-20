@@ -12,7 +12,9 @@
  * the English before it decides which tradesperson gets dispatched.
  */
 import { getHelperSession } from "@/lib/auth";
-import { SarvamError, sarvamConfigured, speechToEnglish } from "@/lib/sarvam";
+import { languageOf } from "@/lib/languages";
+import { SarvamError, sarvamConfigured, speechToEnglish, speechToText, toSarvamLang, translateText } from "@/lib/sarvam";
+import { getStore } from "@/lib/store";
 import { json, jsonError, safe } from "@/lib/validate";
 
 export const dynamic = "force-dynamic";
@@ -49,10 +51,28 @@ export const POST = safe(async (req: Request) => {
   const base = file.type.split(";")[0].trim().toLowerCase();
   if (base && !TYPES.includes(base)) return jsonError(400, "audio_type_invalid", { detail: file.type });
 
+  /**
+   * Recognition is ANCHORED to the language the person chose, not left to auto-detect.
+   *
+   * Auto-detect is a guess made on a few seconds of audio in a noisy kitchen, and when it guesses wrong the
+   * transcript is wrong in a way nobody downstream can spot. Someone who has set their language to Tamil has
+   * already told us the answer, so we use it: transcribe in Tamil, then translate. Auto-detect stays as the
+   * fallback for an account with no language set.
+   */
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const me = s.helperId ? await getStore().getHelper(s.helperId) : null;
+  const chosen = me?.language ? toSarvamLang(languageOf(me.language).code) : null;
+
   try {
-    const out = await speechToEnglish(Buffer.from(await file.arrayBuffer()), file.name || "speech.webm");
-    console.log(`[speech] ${file.size} bytes -> "${out.text.slice(0, 60)}" (heard ${out.detected ?? "?"})`);
-    return json({ text: out.text, detected: out.detected, confidence: out.confidence });
+    if (chosen && chosen !== "en-IN") {
+      const heard = await speechToText(bytes, chosen, file.name || "speech.webm");
+      const english = await translateText({ text: heard.text, from: chosen, to: "en-IN" });
+      console.log(`[speech] ${file.size} bytes ${chosen} -> "${english.slice(0, 60)}"`);
+      return json({ text: english, detected: chosen, confidence: null, heard: heard.text });
+    }
+    const out = await speechToEnglish(bytes, file.name || "speech.webm");
+    console.log(`[speech] ${file.size} bytes auto -> "${out.text.slice(0, 60)}" (heard ${out.detected ?? "?"})`);
+    return json({ text: out.text, detected: out.detected, confidence: out.confidence, heard: null });
   } catch (e) {
     const code = e instanceof SarvamError ? e.code : "unavailable";
     console.error("[speech] failed:", code, e instanceof Error ? e.message : e);

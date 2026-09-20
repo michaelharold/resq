@@ -1,7 +1,7 @@
 /**
  * Sarvam AI — speech and translation for Indian languages.
  *
- * This is the one piece of ResQ that is not local, and it earns that exception. Measured on this laptop:
+ * This is the one piece of Sahaya that is not local, and it earns that exception. Measured on this laptop:
  *
  *   task                     local model                          Sarvam
  *   ----------------------   ----------------------------------   --------------------------------

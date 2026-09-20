@@ -1,5 +1,5 @@
 /**
- * ResQ taxonomy — the single source of truth for skills, need types and urgencies
+ * Sahaya taxonomy — the single source of truth for skills, need types and urgencies
  * (README §4, CONTRACTS §1). Both the Ollama system prompt (lib/triage.ts) and the
  * keyword-rules fallback (lib/triage-rules.ts) read from this file; the UI and the
  * SMS templates use the label maps.
@@ -36,7 +36,7 @@ export const SKILLS = [
 /**
  * Services a user can request with one tap, in display order. Each is also a skill a provider can offer.
  *
- * Trades only. doctor / nurse / caregiver were bookable here and are deliberately not any more: ResQ is a local
+ * Trades only. doctor / nurse / caregiver were bookable here and are deliberately not any more: Sahaya is a local
  * trades marketplace, and dispatching medical care through it invites an expectation of clinical judgement the
  * product has no business making. Those three remain in SKILLS below because the emergency triage tables still
  * map need types onto them; they are simply not something a neighbour can book with a tap.

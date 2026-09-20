@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     const caller = phone ? await store.getHelperByPhone(phone) : null;
     if (!caller) {
       return xml(voiceXml(
-        say("This number is not registered with ResQ. Please sign up in the app first, then call back.", lang),
+        say("This number is not registered with Sahaya. Please sign up in the app first, then call back.", lang),
         "<Hangup/>",
       ));
     }
@@ -75,7 +75,7 @@ export async function POST(req: Request) {
       return xml(voiceXml(
         say("Your message is being delivered now. Say anything else after the beep, or hang up.", lang),
         gatherSpeech({ action: `/api/twilio/voice/message?lang=${lang}&r=${encodeURIComponent(requestId)}`, lang, prompt: "" }),
-        say("Thank you. ResQ will call you when there is a reply.", lang),
+        say("Thank you. Sahaya will call you when there is a reply.", lang),
         "<Hangup/>",
       ));
     }
@@ -89,7 +89,7 @@ export async function POST(req: Request) {
     } catch (e) {
       if (!(e instanceof ScopeError)) throw e;
       return xml(voiceXml(
-        say("ResQ could not work out what kind of help you need. Please try again, or use the app.", lang),
+        say("Sahaya could not work out what kind of help you need. Please try again, or use the app.", lang),
         "<Hangup/>",
       ));
     }
@@ -103,7 +103,7 @@ export async function POST(req: Request) {
 
     const label = SKILL_LABELS[service] ?? service;
     return xml(voiceXml(
-      say(`ResQ is looking for a ${label} near you. We will call you as soon as someone accepts.`, lang),
+      say(`Sahaya is looking for a ${label} near you. We will call you as soon as someone accepts.`, lang),
       gatherSpeech({
         action: `/api/twilio/voice/message?lang=${lang}&r=${encodeURIComponent(request.id)}`,
         lang, prompt: "If you want to add anything, say it now. Otherwise you can hang up.",

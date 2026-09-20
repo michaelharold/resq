@@ -1,5 +1,5 @@
 /**
- * ResQ guidance cards (README §4, §8, §10 rule 9; CONTRACTS §7).
+ * Sahaya guidance cards (README §4, §8, §10 rule 9; CONTRACTS §7).
  *
  * Static, curated "what do I do right now" text shown to the requester while
  * helpers are being dispatched. The LLM never writes or edits this content; it

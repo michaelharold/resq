@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
- * ResQ visual language.
+ * Sahaya visual language.
  *
  * Warm bone canvas, one saturated accent, and a pastel per trade. The tints are the load-bearing idea: a plumber
  * job is always sky, an electrician always butter, so someone scanning a busy feed finds their trade by colour
@@ -24,11 +24,13 @@
   --color-violet-soft: #EDE9FD;
 
   /* Status — kept muted so they never compete with the accent */
-  --color-positive: #2E9E5B;
+  /* Measured against their own soft fills: the previous values scored 3.0-3.1:1 as 12px text, below the 4.5
+     WCAG AA needs. These clear it while still reading as green / amber / red. */
+  --color-positive: #1B7A45;
   --color-positive-soft: #E3F5EA;
-  --color-warn: #C2763A;
+  --color-warn: #8F5420;
   --color-warn-soft: #FBEEE2;
-  --color-alert: #D6453F;
+  --color-alert: #B8332D;
   --color-alert-soft: #FCEBEA;
 
   /* One tint per bookable trade (lib/theme.ts maps service -> name) */
@@ -48,11 +50,11 @@
   --color-resq-red-dark: #5638D4;
   --color-resq-navy: #15141B;
   --color-resq-navy-dark: #000000;
-  --color-resq-green: #2E9E5B;
+  --color-resq-green: #1B7A45;
   --color-resq-green-light: #E3F5EA;
   --color-resq-cyan: #6D4DE6;
   --color-resq-cyan-light: #EDE9FD;
-  --color-resq-amber: #C2763A;
+  --color-resq-amber: #8F5420;
   --color-resq-slate: #6E6A79;
 
   --font-sans: var(--font-jakarta), system-ui, sans-serif;

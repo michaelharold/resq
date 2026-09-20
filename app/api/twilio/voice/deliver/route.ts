@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     if (!m) return xml(voiceXml(say("This message is no longer available.", DEFAULT_LANGUAGE), "<Hangup/>"));
 
     const who = m.fromRole === "requester" ? "the customer" : "your worker";
-    const intro = say(`ResQ has a message from ${who}.`, m.targetLang);
+    const intro = say(`Sahaya has a message from ${who}.`, m.targetLang);
 
     const body = m.translationSource === "failed"
       ? [

@@ -1,5 +1,5 @@
 /**
- * ResQ keyword-rules triage — the fallback when Ollama is slow, unreachable, returns
+ * Sahaya keyword-rules triage — the fallback when Ollama is slow, unreachable, returns
  * invalid JSON or is unsure (README §4, CONTRACTS §7 "lib/triage-rules.ts").
  *
  * `triageByRules(text)` is pure, synchronous, never throws and returns in microseconds:

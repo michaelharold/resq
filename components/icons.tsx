@@ -1,4 +1,4 @@
-/* Icon set exported from the ResQ Figma Make design (src/App.tsx). */
+/* Icon set exported from the Sahaya Figma Make design (src/App.tsx). */
 /* eslint-disable */
 type P = { size?: number; className?: string };
 

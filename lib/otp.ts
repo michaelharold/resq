@@ -1,7 +1,7 @@
 /**
  * Sign-in codes are delivered to the phone, never shown on screen:
  *   1. TWILIO_VERIFY_SERVICE_SID set → Twilio Verify sends and checks the code (best delivery to Indian numbers).
- *   2. Otherwise → ResQ generates the code and texts it with Twilio Messaging (TWILIO_FROM).
+ *   2. Otherwise → Sahaya generates the code and texts it with Twilio Messaging (TWILIO_FROM).
  *   3. No Twilio at all → refused with "sms_not_configured", unless RESQ_SHOW_OTP_ON_SCREEN=1 (offline demo only).
  */
 import { randomInt } from "node:crypto";

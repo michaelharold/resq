@@ -1,4 +1,4 @@
-# ResQ upgrade — six features, mapped onto the existing code
+# Sahaya upgrade — six features, mapped onto the existing code
 
 The product spec speaks of `Incident`, `Volunteer` and `lib/store.ts`. In this codebase those are **`HelpRequest`**,
 **`Helper`** and **`lib/store/` (`getStore()`)**. Everything below uses the real names.

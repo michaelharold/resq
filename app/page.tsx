@@ -1,6 +1,6 @@
 "use client";
 /*
- * ResQ — a local-services community ("Uber for neighbours and local professionals").
+ * Sahaya — a local-services community ("Uber for neighbours and local professionals").
  *   sign in (phone + code) → profile (details, services you offer with a price range, ID proof) → home
  *   home: tap a service (Plumber, Electrician, Doctor…) → describe the problem → nearby providers get it live
  *         → one accepts → call / message / live map → they name their charge → pay in app (Razorpay) + rate
@@ -47,7 +47,7 @@ async function whereAmI(center: LatLng): Promise<{ at: LatLng; source: "gps" | "
   return p && distanceKm(p, center) <= DEMO_RADIUS_KM ? { at: p, source: "gps" } : { at: demoSpot(center), source: "demo" };
 }
 
-export default function ResQApp() {
+export default function SahayaApp() {
   const [screen, setScreen] = useState<Screen>({ name: "loading" });
   const [config, setConfig] = useState<Config | null>(null);
   const [dash, setDash] = useState<Dashboard | null>(null);
@@ -92,20 +92,26 @@ export default function ResQApp() {
 function AuthScreen({ onDone }: { onDone: () => void }) {
   return (
     <div className="flex min-h-dvh flex-col bg-navy-gradient">
-      <Container className="flex flex-1 flex-col items-center justify-center gap-6 px-5 py-10">
-        <div className="animate-slide-up flex flex-col items-center gap-3 text-center">
-          <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-resq-red" style={{ boxShadow: "0 0 60px rgba(220,38,38,.4)" }}><Logo size={42} /></div>
-          <h1 className="font-display text-4xl font-bold text-white">ResQ</h1>
-          <p className="max-w-sm text-white/70">Trusted local help, one tap away. Plumbers, electricians, doctors and more from your own neighbourhood, and a way to earn from your skills.</p>
+      <Container className="flex flex-1 flex-col items-center justify-center gap-7 px-5 py-10">
+        <div className="animate-slide-up flex flex-col items-center gap-4 text-center">
+          <div className="flex h-20 w-20 items-center justify-center rounded-[1.75rem] bg-violet text-white card-shadow-lg"><Logo size={42} /></div>
+          <div>
+            <h1 className="font-display text-5xl font-extrabold tracking-tight text-ink">Sahaya</h1>
+            {/* The tagline is the promise, so it gets the display italic — the one flourish on this screen. */}
+            <p className="mt-1 font-display text-lg font-bold text-ink display-italic">Trusted Help, Right Around You</p>
+          </div>
+          <p className="max-w-sm text-sm leading-relaxed text-mist">
+            Plumbers, electricians, carpenters and more from your own neighbourhood — and a way to earn from your own skills.
+          </p>
         </div>
-        <div className="card-shadow-lg w-full max-w-md rounded-3xl bg-white p-6">
-          <h2 className="font-display text-xl font-bold text-resq-navy">Sign in or create your account</h2>
-          <p className="mb-4 mt-1 text-sm text-resq-slate">We&apos;ll text you a 6-digit code. New here? You&apos;ll set up your profile next.</p>
+        <div className="card-shadow-lg w-full max-w-md rounded-[1.75rem] bg-surface p-6">
+          <h2 className="font-display text-xl font-extrabold text-ink">Sign in or create your account</h2>
+          <p className="mb-4 mt-1 text-sm text-mist">We&apos;ll text you a 6-digit code. New here? You&apos;ll set up your profile next.</p>
           <OtpForm onDone={() => onDone()} cta="Continue" />
         </div>
-        <div className="flex gap-4 text-xs text-white/50">
-          <Link href="/ops" className="underline">Admin login</Link>
-          <Link href="/demo" className="underline">Demo launcher</Link>
+        <div className="flex gap-5 text-xs font-medium text-mist">
+          <Link href="/ops" className="underline underline-offset-2 hover:text-ink">Admin login</Link>
+          <Link href="/demo" className="underline underline-offset-2 hover:text-ink">Demo launcher</Link>
         </div>
       </Container>
     </div>
@@ -184,8 +190,8 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
         <ol className="mx-auto flex max-w-3xl gap-2 px-5 pb-5">
           {steps.map((t, i) => (
             <li key={t} className="flex-1">
-              <div className={`h-1.5 rounded-full ${i <= step ? "bg-resq-red" : "bg-white/15"}`} />
-              <p className={`mt-1.5 text-xs ${i === step ? "font-semibold text-white" : "text-white/50"}`}>{i + 1}. {t}</p>
+              <div className={`h-1.5 rounded-full ${i <= step ? "bg-violet" : "bg-hairline"}`} />
+              <p className={`mt-1.5 text-xs ${i === step ? "font-bold text-ink" : "text-mist"}`}>{i + 1}. {t}</p>
             </li>
           ))}
         </ol>
@@ -267,7 +273,7 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
                   {me?.idProof && !file && <div className="mb-2 flex items-center gap-2 text-sm text-resq-navy"><VerifiedBadge verified={me.idProof.status === "verified"} pending={me.idProof.status === "pending"} /><span className="truncate">{me.idProof.fileName}</span>{me.idProof.status === "rejected" && <span className="text-resq-red">Rejected{me.idProof.note ? `: ${me.idProof.note}` : ""}. Upload again.</span>}</div>}
                   <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" aria-label="ID proof" onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                     className="block w-full text-sm text-resq-slate file:mr-3 file:min-h-11 file:rounded-xl file:border-0 file:bg-resq-navy file:px-4 file:font-semibold file:text-white" />
-                  <p className="mt-2 text-xs text-resq-slate">JPG, PNG, WEBP or PDF, up to 5 MB. Visible only to ResQ admins.</p>
+                  <p className="mt-2 text-xs text-resq-slate">JPG, PNG, WEBP or PDF, up to 5 MB. Visible only to Sahaya admins.</p>
                 </div>
               </>
             )}
@@ -292,11 +298,11 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
             {offered.length > 0 && (
               <button onClick={() => setAvailable(!available)} aria-pressed={available}
                 className={`flex min-h-16 w-full items-center justify-between rounded-2xl px-5 text-left ${available ? "bg-resq-green text-white" : "border-2 border-slate-200 bg-white text-resq-navy"}`}>
-                <div><p className="font-display text-lg font-bold">Available for work</p><p className={`text-xs ${available ? "text-white/80" : "text-resq-slate"}`}>Nearby requests for your services reach you instantly.</p></div>
+                <div><p className="font-display text-lg font-bold">Available for work</p><p className={`text-xs ${available ? "text-white/85" : "text-mist"}`}>Nearby requests for your services reach you instantly.</p></div>
                 <div className={`flex h-8 w-14 items-center rounded-full p-1 ${available ? "justify-end bg-white/30" : "justify-start bg-slate-200"}`}><div className="h-6 w-6 rounded-full bg-white shadow" /></div>
               </button>
             )}
-            <button onClick={save} disabled={busy} className="min-h-14 w-full rounded-2xl bg-resq-red font-display text-lg font-bold text-white disabled:opacity-60">{busy ? "Saving…" : editing ? "Save profile" : "Start using ResQ"}</button>
+            <button onClick={save} disabled={busy} className="min-h-14 w-full rounded-2xl bg-resq-red font-display text-lg font-bold text-white disabled:opacity-60">{busy ? "Saving…" : editing ? "Save profile" : "Start using Sahaya"}</button>
           </div>
         )}
       </main>
@@ -341,7 +347,7 @@ function Home({ initial, config, onService, onOpenRequest, onProfile, onSignOut 
     const fresh = dash.feed.filter((f) => !seen.current.has(f.request.id));
     if (fresh.length) { beep(); try { navigator.vibrate?.([250, 100, 250]); } catch { /* unsupported */ } }
     fresh.forEach((f) => seen.current.add(f.request.id));
-    document.title = dash.feed.length ? `(${dash.feed.length}) New job nearby · ResQ` : "ResQ";
+    document.title = dash.feed.length ? `(${dash.feed.length}) New job nearby · Sahaya` : "Sahaya";
   }, [dash.feed]);
 
   // The request someone is reading was taken or closed meanwhile → close it and say so.
@@ -382,11 +388,11 @@ function Home({ initial, config, onService, onOpenRequest, onProfile, onSignOut 
     if (!dash.active) return;
     const r = await api(`/api/requests/${dash.active.request.id}`, { method: "PATCH", body: { action: "resolve" } });
     setToast(!r.ok ? "Could not close that job. Try again."
-      : summary ? `Job done. ${summary.grossPretty} is now on ${dash.active.request.requesterName ?? "the customer"}'s screen to pay; ${summary.payoutPretty} reaches your ResQ wallet the moment they do.`
+      : summary ? `Job done. ${summary.grossPretty} is now on ${dash.active.request.requesterName ?? "the customer"}'s screen to pay; ${summary.payoutPretty} reaches your Sahaya wallet the moment they do.`
       : "Job marked as done.");
     void reload();
   };
-  const signOut = async () => { await api("/api/auth/logout", { method: "POST", body: {} }); document.title = "ResQ"; onSignOut(); };
+  const signOut = async () => { await api("/api/auth/logout", { method: "POST", body: {} }); document.title = "Sahaya"; onSignOut(); };
 
   return (
     <>
@@ -552,12 +558,12 @@ function JobSheet({ f, me, onClose, onAccept, onDecline }: { f: FeedItem; me: He
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-resq-navy-dark/60 backdrop-blur-sm md:items-center" role="dialog" aria-modal="true" aria-labelledby="job-title" onClick={onClose}>
       <div className="animate-slide-up max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white shadow-2xl md:rounded-3xl" onClick={(e) => e.stopPropagation()}>
-        <div className="bg-navy-gradient px-5 py-4 text-white">
+        <div className="bg-navy-gradient px-5 py-4">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-white/60">New job request</p>
+              <p className="text-xs font-bold text-mist">New job request</p>
               <h2 id="job-title" className="mt-1 font-display text-2xl font-bold">{m?.label ?? "Job"}</h2>
-              <p className="text-sm text-white/80">{fmtDistance(f.distanceKm)} from you · {fmtTime(r.createdAt)}</p>
+              <p className="text-sm text-mist">{fmtDistance(f.distanceKm)} from you · {fmtTime(r.createdAt)}</p>
             </div>
             <button onClick={onClose} aria-label="Close" className="flex h-10 w-10 items-center justify-center rounded-xl hover:bg-white/15"><Icon.X size={18} /></button>
           </div>
@@ -683,9 +689,10 @@ function Describe({ service, me, center, onBack, onCreated }: { service: Service
           : "Could not understand that recording. Try again, or type it.");
         return;
       }
-      const data = (await res.json()) as { text: string; detected: string | null };
+      const data = (await res.json()) as { text: string; detected: string | null; heard: string | null };
       setText(data.text);
       setHeardLang(data.detected);
+      if (data.heard) setSpoken(data.heard);   // their own words stay on screen beside the English
       setTranslateNote(`Heard ${secs}s of ${data.detected ? languageLabel(data.detected) : "speech"} and wrote it in English. Check it and edit if it is wrong.`);
     } catch {
       setVoiceErr("Could not send that recording. Try again, or type it.");
@@ -754,7 +761,7 @@ function Describe({ service, me, center, onBack, onCreated }: { service: Service
         </div>
         {micSupported && !micOn && !spoken && !translating && !heardLang && (
           <p className="mt-2 text-xs text-resq-slate">
-            Tap the mic and speak in {languageOf(myLang).endonym} — ResQ writes it in English for the provider.
+            Tap the mic and speak in {languageOf(myLang).endonym} — Sahaya writes it in English for the provider.
             {recorder.supported && " Tap it again when you have finished."}
           </p>
         )}

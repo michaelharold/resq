@@ -118,7 +118,7 @@ function WorkerSettlement({ s, customerName }: { s: Settlement; customerName: st
         {s.reimbursementPaise > 0 ? ` + ${formatPaise(s.reimbursementPaise)} for approved parts` : ""}
       </p>
       <p className="mt-2 text-xs text-resq-navy">
-        {customerName} is asked for <strong>{formatPaise(s.grossPaise)}</strong>. Your share lands in your ResQ wallet the moment they pay.
+        {customerName} is asked for <strong>{formatPaise(s.grossPaise)}</strong>. Your share lands in your Sahaya wallet the moment they pay.
       </p>
     </div>
   );
@@ -185,7 +185,7 @@ export function WorkerMoneyPanel({ requestId, rateHint, customerName, onDone }: 
         </div>
         {claims.length > 0 && <ul className="mb-2 space-y-2">{claims.map((c) => <WorkerReceiptCard key={c.id} requestId={requestId} r={c} />)}</ul>}
         <ReceiptUploader requestId={requestId} filed={filed} max={receipts?.maxPerJob ?? 5} onFiled={reload} />
-        <p className="mt-2 text-xs text-resq-slate">{customerName} approves each receipt. Approved parts are added to your payout in full — ResQ takes no cut of them.</p>
+        <p className="mt-2 text-xs text-resq-slate">{customerName} approves each receipt. Approved parts are added to your payout in full — Sahaya takes no cut of them.</p>
       </section>
 
       {step === "idle" && (
@@ -294,7 +294,7 @@ function PaidCard({ bill, settlement, workerName }: { bill: Bill; settlement: Se
         <BillLines bill={bill} settlement={settlement} workerName={workerName} />
         <div className="space-y-1.5 rounded-xl bg-slate-50 p-3">
           <Line label={`${workerName} received`} value={formatPaise(settlement.payoutPaise)} />
-          <Line label={`ResQ platform fee (${settlement.commissionPct}% of the work)`} value={formatPaise(settlement.commissionPaise)} />
+          <Line label={`Sahaya platform fee (${settlement.commissionPct}% of the work)`} value={formatPaise(settlement.commissionPaise)} />
         </div>
         {bill.provider === "demo" && <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">Demo payment — no real money moved. This server has no Razorpay keys configured.</p>}
       </div>
@@ -353,7 +353,7 @@ export function PaymentPanel({ requestId, workerName, status }: { requestId: str
     setStage("checkout");
     new Checkout({
       key: o.data.keyId, amount: o.data.amountPaise, currency: o.data.currency || "INR",
-      name: "ResQ", description: `${workerName} · ${formatPaise(o.data.amountPaise)}`, order_id: o.data.orderId,
+      name: "Sahaya", description: `${workerName} · ${formatPaise(o.data.amountPaise)}`, order_id: o.data.orderId,
       theme: { color: "#1E3A5F" },
       handler: (res) => void confirm({
         razorpay_order_id: res.razorpay_order_id ?? o.data.orderId,
@@ -373,7 +373,7 @@ export function PaymentPanel({ requestId, workerName, status }: { requestId: str
           <div>
             <h3 className="font-display text-lg font-bold text-resq-navy">{workerName} bought parts for this job</h3>
             <p className="text-sm text-resq-slate">
-              {pendingClaims.length === 0 ? "Approved parts are added to your final bill in full — ResQ takes no commission on them."
+              {pendingClaims.length === 0 ? "Approved parts are added to your final bill in full — Sahaya takes no commission on them."
                 : locked ? "The bill is closed while your payment is being settled, so these can no longer be decided here."
                 : "Look at the bill they photographed. Nothing is added to what you owe until you approve it."}
             </p>
@@ -415,7 +415,7 @@ export function PaymentPanel({ requestId, workerName, status }: { requestId: str
                   <div className="animate-slide-up mt-3 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
                     <p className="font-display font-bold text-amber-900">Demo payment — no money moves</p>
                     <p className="mt-1 text-xs leading-snug text-amber-900">
-                      This server has no Razorpay keys, so there is no real checkout to open. Confirming records {formatPaise(order.amountPaise)} as paid and credits {workerName}’s ResQ wallet, exactly as a real payment would — but no bank is involved.
+                      This server has no Razorpay keys, so there is no real checkout to open. Confirming records {formatPaise(order.amountPaise)} as paid and credits {workerName}’s Sahaya wallet, exactly as a real payment would — but no bank is involved.
                     </p>
                     <div className="mt-3 grid grid-cols-[1fr_1.4fr] gap-2">
                       <button onClick={() => setStage("idle")} className="min-h-14 rounded-2xl border border-amber-300 bg-white text-sm font-semibold text-amber-900">Cancel</button>
@@ -431,7 +431,7 @@ export function PaymentPanel({ requestId, workerName, status }: { requestId: str
                     <p className="mt-2 text-center text-xs text-resq-slate">
                       {bill.provider === "demo"
                         ? "Demo mode: no Razorpay keys on this server, so no real money moves."
-                        : `Card, UPI or netbanking via Razorpay. ${workerName} is paid ${formatPaise(settlement.payoutPaise)}; ResQ keeps ${formatPaise(settlement.commissionPaise)} of the work as its fee.`}
+                        : `Card, UPI or netbanking via Razorpay. ${workerName} is paid ${formatPaise(settlement.payoutPaise)}; Sahaya keeps ${formatPaise(settlement.commissionPaise)} of the work as its fee.`}
                     </p>
                   </>
                 )}

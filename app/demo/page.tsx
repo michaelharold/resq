@@ -29,7 +29,7 @@ export default function DemoPage() {
       <div className="mx-auto max-w-4xl">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-resq-red"><Logo size={28} /></div>
-          <div><h1 className="font-display text-3xl font-bold text-white">Demo launcher</h1><p className="text-sm text-white/60">Run the whole community on one laptop: every window is a different person. About 7 minutes.</p></div>
+          <div><h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">Demo launcher</h1><p className="text-sm text-mist">Run the whole community on one laptop: every window is a different person. About 7 minutes.</p></div>
         </div>
 
         <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -40,18 +40,18 @@ export default function DemoPage() {
             <button key={b.label} onClick={() => (b.wide ? window.open("/ops", "_blank", "noopener") : open(b.path, next()))}
               className="rounded-2xl border border-white/15 bg-white/5 p-5 text-left transition-colors hover:bg-white/10">
               <div className={`mb-3 flex h-11 w-11 items-center justify-center rounded-xl text-white ${b.cls}`}>{b.icon}</div>
-              <p className="font-display text-lg font-bold text-white">Open {b.label.toLowerCase()}</p>
-              <p className="text-sm text-white/60">{b.sub}</p>
+              <p className="font-display text-lg font-extrabold text-ink">Open {b.label.toLowerCase()}</p>
+              <p className="text-sm text-mist">{b.sub}</p>
             </button>
           ))}
           <button onClick={() => { open("/", 0); open("/", 1); open("/", 2); open("/", 3); }}
             className="rounded-2xl border-2 border-resq-red bg-resq-red/20 p-5 text-left transition-colors hover:bg-resq-red/30">
             <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-resq-red text-white"><Icon.Expand size={22} /></div>
-            <p className="font-display text-lg font-bold text-white">Open 4 users</p>
-            <p className="text-sm text-white/60">4 users side by side</p>
+            <p className="font-display text-lg font-extrabold text-ink">Open 4 users</p>
+            <p className="text-sm text-mist">4 users side by side</p>
           </button>
         </div>
-        <p className="mt-3 text-xs text-white/50">If nothing opens, allow pop-ups for this site. On phones, just open the helper and requester pages on different devices.</p>
+        <p className="mt-3 text-xs text-mist">If nothing opens, allow pop-ups for this site. On phones, just open the helper and requester pages on different devices.</p>
 
         <ol className="mt-10 grid gap-3 md:grid-cols-2">
           {steps.map((s) => (
@@ -66,7 +66,7 @@ export default function DemoPage() {
           <p className="font-semibold text-amber-200">Why windows, not tabs?</p>
           <p className="mt-1">Each window keeps its own identity in session storage, so one browser can be a requester and several helpers at once. A duplicated tab copies that identity; open new ones from here instead.</p>
         </div>
-        <Link href="/" className="mt-8 inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/20 px-5 text-sm font-semibold text-white"><Icon.ChevronLeft size={16} />Back to ResQ</Link>
+        <Link href="/" className="card-shadow mt-8 inline-flex min-h-12 items-center gap-2 rounded-full bg-surface px-5 text-sm font-semibold text-ink"><Icon.ChevronLeft size={16} />Back to Sahaya</Link>
       </div>
     </div>
   );

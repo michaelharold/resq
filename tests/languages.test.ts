@@ -22,7 +22,7 @@ test("codes are unique and the defaults are real languages", () => {
   assert.equal(new Set(codes).size, codes.length, "duplicate language code");
   assert.ok(isLanguage(DEFAULT_LANGUAGE));
   assert.ok(isLanguage(FALLBACK_LANGUAGE));
-  assert.equal(DEFAULT_LANGUAGE, "ml-IN", "ResQ is built for Kerala first");
+  assert.equal(DEFAULT_LANGUAGE, "ml-IN", "Sahaya is built for Kerala first");
 });
 
 test("an unknown or missing code never throws — it falls back", () => {

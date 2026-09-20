@@ -28,7 +28,7 @@ export function Triaging({ text }: { text: string }) {
       <div className="bg-ai-gradient px-5 pb-5 pt-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><Icon.Activity size={20} className="text-white" /></div>
-          <div><p className="text-sm font-semibold text-white">ResQ AI · on-device</p><p className="text-xs text-white/75">Understanding your emergency…</p></div>
+          <div><p className="text-sm font-semibold text-white">Sahaya AI · on-device</p><p className="text-xs text-white/75">Understanding your emergency…</p></div>
         </div>
       </div>
       <main className="mx-auto w-full max-w-3xl flex-1 space-y-4 px-4 py-5">
@@ -113,14 +113,14 @@ export function RequestScreen({ id, config, onClose, onRetry }: { id: string; co
   const gig = categoryOf(r) === "HOUSEHOLD_MICROGIG";
   const hazard = t?.hazardAlert?.hasHazard ? t.hazardAlert : null;
   const header = gig ? {
-    triaging: { bg: "bg-ai-gradient", title: "Understanding your request", sub: "ResQ AI is checking the job for hidden hazards" },
+    triaging: { bg: "bg-ai-gradient", title: "Understanding your request", sub: "Sahaya AI is checking the job for hidden hazards" },
     searching: { bg: "bg-navy-gradient", title: "Finding a Certified Pro", sub: `Wave ${r.wave} of 4 · pinging Certified Pros within ${r.radiusKm} km` },
     matched: { bg: "bg-success-gradient", title: "A pro is on the way", sub: view.matchedHelper ? `${view.matchedHelper.name} accepted your job` : "A Certified Pro accepted" },
     resolved: { bg: "bg-success-gradient", title: "Job done", sub: "The callout fee was released to your helper" },
     escalated: { bg: "bg-navy-gradient", title: "No pro available right now", sub: "No Certified Pro nearby accepted this job." },
     cancelled: { bg: "bg-navy-gradient", title: "Request cancelled", sub: "Helpers have been stood down" },
   }[r.status] : {
-    triaging: { bg: "bg-ai-gradient", title: "Understanding your emergency", sub: "ResQ AI is classifying your request" },
+    triaging: { bg: "bg-ai-gradient", title: "Understanding your emergency", sub: "Sahaya AI is classifying your request" },
     searching: { bg: "bg-navy-gradient", title: "Finding help", sub: `Wave ${r.wave} of 4 · pinging the best helpers within ${r.radiusKm} km` },
     matched: { bg: "bg-success-gradient", title: "Help is on the way", sub: view.matchedHelper ? `${view.matchedHelper.name} accepted your request` : "A helper accepted" },
     resolved: { bg: "bg-success-gradient", title: "Marked as resolved", sub: "We hope everyone is safe" },
@@ -355,7 +355,7 @@ function TriageCard({ view }: { view: RequestView }) {
     <section className="card-shadow overflow-hidden rounded-2xl border border-slate-100 bg-white">
       <div className="flex items-center gap-2 bg-ai-gradient px-4 py-2.5">
         <Icon.Activity size={16} className="text-white" />
-        <p className="text-sm font-semibold text-white">ResQ AI triage</p>
+        <p className="text-sm font-semibold text-white">Sahaya AI triage</p>
         <span className="ml-auto rounded-lg bg-white/20 px-2 py-0.5 text-xs font-semibold text-white">{t.source === "ollama" ? "Local AI" : "Keyword rules"}</span>
       </div>
       <div className="p-4">

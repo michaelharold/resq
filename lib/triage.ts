@@ -1,5 +1,5 @@
 /**
- * ResQ triage — Ollama structured classification with a rules fallback
+ * Sahaya triage — Ollama structured classification with a rules fallback
  * (README §4, §10 rule 2; CONTRACTS §6 `GET/POST /api/triage`, §7 `lib/triage.ts`).
  *
  * The model only CLASSIFIES (need type, urgency, skills, equipment, hidden scene hazard,

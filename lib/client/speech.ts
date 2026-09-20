@@ -32,7 +32,7 @@ export type SpeechHandlers = {
   maxMs?: number;
   /**
    * When the requested language cannot be recognised, try once more in this one instead of failing.
-   * For ResQ that is "en-IN": Chrome transcribes Malayalam speech phonetically into Latin letters, which is
+   * For Sahaya that is "en-IN": Chrome transcribes Malayalam speech phonetically into Latin letters, which is
    * Manglish ("ente pipe leak avunu") — and lib/translate.ts reads Manglish better than it reads the script.
    */
   fallbackLang?: string;

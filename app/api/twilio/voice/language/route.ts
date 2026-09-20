@@ -36,7 +36,7 @@ export async function POST(req: Request) {
 
     const prompt = open
       ? "You have a job open. Say your message for the other person after the beep. You have one minute."
-      : "In one minute, tell ResQ what help you need and where you are. Speak after the beep.";
+      : "In one minute, tell Sahaya what help you need and where you are. Speak after the beep.";
 
     return xml(voiceXml(gatherSpeech({
       action: `/api/twilio/voice/message?lang=${languageOf(lang).code}${open ? `&r=${encodeURIComponent(open.id)}` : ""}`,

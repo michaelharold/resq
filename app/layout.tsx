@@ -7,15 +7,16 @@ import "./globals.css";
 const jakarta = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["400","500","600","700","800"], variable: "--font-jakarta" });
 
 export const metadata: Metadata = {
-  title: "ResQ",
-  description: "Skilled neighbours, dispatched in seconds",
+  title: { default: "Sahaya — Trusted Help, Right Around You", template: "%s · Sahaya" },
+  description: "Book a trusted plumber, electrician or carpenter from your own neighbourhood, in your own language. Or earn from the skills you already have.",
+  applicationName: "Sahaya",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#1E3A5F",
+  themeColor: "#F4F1EB",   // matches the app canvas, so the phone chrome does not fight it
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

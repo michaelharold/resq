@@ -1,4 +1,4 @@
-# ResQ — how it works
+# Sahaya — how it works
 
 One app for everyone at `/`, a coordinator console at `/ops`, and SMS for people without data.
 This document describes the features that are built and working today.
@@ -9,7 +9,7 @@ This document describes the features that are built and working today.
 
 ```mermaid
 flowchart LR
-  A[Open ResQ] --> B[Sign in: phone + 6-digit code]
+  A[Open Sahaya] --> B[Sign in: phone + 6-digit code]
   B --> C{First time?}
   C -- yes --> D[Profile: details, skills, equipment]
   C -- no --> E[Dashboard]
@@ -46,7 +46,7 @@ From then on the app shares the user's location every 30 s (visible, pausable), 
 ```mermaid
 sequenceDiagram
   actor R as Person in trouble
-  participant App as ResQ app
+  participant App as Sahaya app
   participant AI as Local AI (Ollama)
   participant D as Dispatch
   R->>App: Ask for help: "My father collapsed, not breathing" (text or voice)
@@ -108,7 +108,7 @@ Login is username + password (default `coordinator` / `resq-ops`).
 
 ## 6. No mobile data: SMS
 
-| Text to the ResQ number | Result |
+| Text to the Sahaya number | Result |
 |---|---|
 | `HELP trapped near TKMCE hostel` | Creates a request placed at the named landmark and dispatches helpers. Without a known place it goes straight to the coordinator. |
 | `YES` | A pinged helper accepts their newest request and gets a maps link and the requester's phone. |

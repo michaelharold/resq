@@ -19,7 +19,7 @@ import { VoiceMic } from "./VoiceMic";
  * Speech is recognised in the BROWSER, in the speaker's own language, and only the text is sent. That keeps a
  * voice note free and instant, and means the server never handles raw audio for the in-app path.
  *
- * "Sent by call" on a message means the other person was not in the app, so ResQ rang them and read it aloud —
+ * "Sent by call" on a message means the other person was not in the app, so Sahaya rang them and read it aloud —
  * the thing that makes this work for someone under a sink with a phone in their pocket.
  */
 export function VoiceNotes({ requestId, myLanguage, className = "" }: {
@@ -93,7 +93,7 @@ export function VoiceNotes({ requestId, myLanguage, className = "" }: {
       const data = (await res.json()) as { message: VoiceMessage; deliveredBy: "app" | "call" };
       setDraft("");
       setNote(data.deliveredBy === "call"
-        ? "They are not in the app — ResQ is calling them and reading it out."
+        ? "They are not in the app — Sahaya is calling them and reading it out."
         : "Delivered to their screen.");
       setMessages((cur) => [...cur, data.message]);
     } catch {

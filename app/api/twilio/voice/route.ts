@@ -1,5 +1,5 @@
 /**
- * A phone call arrives at the ResQ number. This is the front door for everyone with no app, no data, or no
+ * A phone call arrives at the Sahaya number. This is the front door for everyone with no app, no data, or no
  * literacy in the language the app happens to be in.
  *
  * Two kinds of caller reach here:
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
           && r.status !== "resolved" && r.status !== "cancelled");
       const prompt = open
         ? `Hello ${known.name}. You have a job open. Say your message for the other person after the beep. You have one minute.`
-        : `Hello ${known.name}. In one minute, tell ResQ what help you need and where you are.`;
+        : `Hello ${known.name}. In one minute, tell Sahaya what help you need and where you are.`;
       return xml(voiceXml(gatherSpeech({
         action: `/api/twilio/voice/message?lang=${lang}${open ? `&r=${encodeURIComponent(open.id)}` : ""}`,
         lang, prompt,
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     const lines = LANGUAGE_MENU.map((l) => say(`For ${l.english}, press ${l.digit}.`, l.code)).join("");
     return xml(voiceXml(
       `<Gather input="dtmf" numDigits="1" timeout="6" action="/api/twilio/voice/language" method="POST" actionOnEmptyResult="true">`,
-      say("Welcome to ResQ.", DEFAULT_LANGUAGE),
+      say("Welcome to Sahaya.", DEFAULT_LANGUAGE),
       lines,
       `</Gather>`,
       // No key pressed: carry on in the default language rather than hanging up on them.

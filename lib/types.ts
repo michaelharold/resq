@@ -1,5 +1,5 @@
 /**
- * ResQ shared types (README §8, CONTRACTS §2).
+ * Sahaya shared types (README §8, CONTRACTS §2).
  *
  * All timestamps are ISO-8601 strings (JSON-safe, adapter-agnostic). Ids are
  * `crypto.randomUUID()` except seeded helpers (`seed-helper-01` … `seed-helper-30`).

@@ -1,5 +1,5 @@
 /**
- * The languages ResQ speaks, and the three different codes each one needs.
+ * The languages Sahaya speaks, and the three different codes each one needs.
  *
  * A customer in Kollam types Malayalam; the electrician who takes the job may read only Tamil. Nothing else in the
  * product matters if those two cannot understand each other, so language is a first-class property of a person,
@@ -31,7 +31,7 @@ export const LANGUAGES = [
 export type LanguageCode = (typeof LANGUAGES)[number]["code"];
 export type Language = (typeof LANGUAGES)[number];
 
-/** What someone gets if they never chose: Malayalam, because ResQ is built for Kerala first. */
+/** What someone gets if they never chose: Malayalam, because Sahaya is built for Kerala first. */
 export const DEFAULT_LANGUAGE: LanguageCode = "ml-IN";
 
 /** The language every fallback lands on. English has the best model coverage, so it is the safe relay pivot. */

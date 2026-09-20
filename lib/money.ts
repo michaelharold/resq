@@ -1,5 +1,5 @@
 /**
- * Money for ResQ jobs. Every amount in this codebase is an INTEGER NUMBER OF PAISE — never a float of rupees.
+ * Money for Sahaya jobs. Every amount in this codebase is an INTEGER NUMBER OF PAISE — never a float of rupees.
  * Razorpay's API is also paise-denominated, so the same integer travels from the worker's quote to the gateway
  * to the worker's wallet without a rounding step anywhere in between.
  *

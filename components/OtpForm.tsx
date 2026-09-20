@@ -65,15 +65,15 @@ export function OtpForm({ onDone, cta = "Verify & continue" }: { onDone: (helper
         </>
       )}
       {msg && <p role="alert" className="mt-3 text-sm font-medium text-resq-red">{msg}</p>}
-      <p className="mt-3 text-xs leading-snug text-resq-slate">
-        While signed in, ResQ shares your location every 30 s with verified authorities so they can find you if a disaster
-        zone (landslide, flood…) is declared around you. You can pause it any time.
+      <p className="mt-3 text-xs leading-snug text-mist">
+        Sahaya uses your location to find help nearby, and shares it only with the person who accepts your job.
+        You can pause sharing any time.
       </p>
       <button type="submit" disabled={busy || (!sent ? phone.trim().length < 10 : code.length !== 6)}
-        className="mt-4 min-h-14 w-full rounded-2xl bg-success-gradient font-display text-lg font-bold text-white shadow-lg disabled:opacity-50">
+        className="mt-4 min-h-14 w-full rounded-full bg-violet font-display text-lg font-bold text-white shadow-lg transition-colors hover:bg-violet-deep disabled:bg-hairline disabled:text-ink/55 disabled:shadow-none">
         {busy ? "Please wait…" : sent ? cta : "Send code"}
       </button>
-      {sent && <button type="button" onClick={() => { setSent(false); setCode(""); setDevCode(null); setSentTo(null); }} className="mt-2 min-h-12 w-full text-sm font-semibold text-resq-slate">Change number</button>}
+      {sent && <button type="button" onClick={() => { setSent(false); setCode(""); setDevCode(null); setSentTo(null); }} className="mt-2 min-h-12 w-full text-sm font-semibold text-mist hover:text-ink">Change number</button>}
     </form>
   );
 }

@@ -7,7 +7,7 @@
  *
  *   - the other party has the app open  -> nothing to do. The message lands on their screen over SSE, in their
  *     own language, and their phone stays quiet.
- *   - the other party is NOT in the app -> ResQ calls them and reads it out. This is the case the whole feature
+ *   - the other party is NOT in the app -> Sahaya calls them and reads it out. This is the case the whole feature
  *     exists for: the plumber who is under a sink with a phone in his pocket still hears "bring a 15 mm elbow".
  *
  * GET — the thread so far. Visible only to the two people on the job; a voice note is a private conversation, not

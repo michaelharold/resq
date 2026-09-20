@@ -38,6 +38,6 @@ test("schema forces the required keys", () => {
 
 test("SMS job alert matches the spec and stays short", () => {
   const m = tplScopedJob({ category: "Plumber", title: "Fix leaking sink", minutes: 45, tools: ["Pipe wrench", "Plunger"], code: "0361", distanceKm: 0.7 });
-  assert.equal(m, "ResQ: Plumber job 700 m away. Fix leaking sink. About 45 min. Bring: Pipe wrench, Plunger. Reply ACCEPT 0361 to take it.");
+  assert.equal(m, "Sahaya: Plumber job 700 m away. Fix leaking sink. About 45 min. Bring: Pipe wrench, Plunger. Reply ACCEPT 0361 to take it.");
   assert.ok(tplScopedJob({ category: "Plumber", title: "x".repeat(200), minutes: 45, tools: Array(20).fill("Pipe wrench"), code: "0361", distanceKm: 1 }).length <= 320);
 });

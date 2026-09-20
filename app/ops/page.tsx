@@ -94,7 +94,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-resq-red"><Logo size={24} /></div>
-            <div><h1 className="font-display text-xl font-bold text-white">ResQ Admin</h1><p className="text-xs text-white/60">Live requests · ID verification</p></div>
+            <div><h1 className="font-display text-xl font-bold text-white">Sahaya Admin</h1><p className="text-xs text-white/60">Live requests · ID verification</p></div>
           </div>
           <div className="ml-auto flex flex-wrap gap-2">
             {[

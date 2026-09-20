@@ -73,7 +73,7 @@ export function ServiceRequestView({ id, onClose }: { id: string; onClose: () =>
   const header = {
     searching: { title: `Finding a ${meta.label.toLowerCase()}`, sub: "Nearby providers have your request. The first to accept gets the job.", bg: "bg-navy-gradient" },
     matched: { title: `${h?.name ?? "Your provider"} is on the way`, sub: `${meta.label} · accepted at ${fmtTime(r.updatedAt)}`, bg: "bg-success-gradient" },
-    resolved: { title: "Job done", sub: "Thanks for using ResQ", bg: "bg-success-gradient" },
+    resolved: { title: "Job done", sub: "Thanks for using Sahaya", bg: "bg-success-gradient" },
     cancelled: { title: "Request cancelled", sub: "Providers have been told", bg: "bg-navy-gradient" },
     escalated: { title: "Still looking", sub: "No one has accepted yet", bg: "bg-navy-gradient" },
     triaging: { title: "Sending…", sub: "", bg: "bg-navy-gradient" },
@@ -89,10 +89,10 @@ export function ServiceRequestView({ id, onClose }: { id: string; onClose: () =>
       <div className={header.bg}>
         <div className="mx-auto max-w-6xl">
           <NavBar title={meta.label} onBack={onClose} light action={
-            <span className="flex items-center gap-1.5 rounded-xl bg-white/15 px-2.5 py-1.5 text-xs font-semibold text-white"><PulsingDot color={connected ? "green" : "red"} />{connected ? "LIVE" : "…"}</span>} />
+            <span className="card-shadow flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-ink"><PulsingDot color={connected ? "green" : "red"} />{connected ? "LIVE" : "…"}</span>} />
         </div>
         <div className="px-5 pb-6 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 text-white">{meta.icon}</div>
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white card-shadow" style={{ color: meta.color }}>{meta.icon}</div>
           <h2 className="font-display text-2xl font-bold text-white">{header.title}</h2>
           <p className="mt-1 text-sm text-white/80">{header.sub}</p>
         </div>

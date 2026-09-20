@@ -1,5 +1,5 @@
 /**
- * ResQ landmark table (README §7, CONTRACTS §7).
+ * Sahaya landmark table (README §7, CONTRACTS §7).
  *
  * SMS-in requests (`HELP <text>`) carry no GPS. `matchLandmark(text)` looks for a
  * known place name in the text so dispatch can still run; when nothing matches the

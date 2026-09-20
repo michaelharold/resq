@@ -1,5 +1,5 @@
 /**
- * ResQ in-process event bus (README §6 "Realtime", §10 rule 4; CONTRACTS §5, §8).
+ * Sahaya in-process event bus (README §6 "Realtime", §10 rule 4; CONTRACTS §5, §8).
  *
  * SINGLE-PROCESS ASSUMPTION
  * -------------------------
