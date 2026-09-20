@@ -70,13 +70,20 @@ export function ServiceRequestView({ id, onClose }: { id: string; onClose: () =>
   if (!view || !r || !service) return <div className="flex flex-1 items-center justify-center text-resq-slate">Loading…</div>;
   const meta = SKILL_META[service];
   const h = view.matchedHelper;
+  /**
+   * Every state uses the same bone header and says what it is in a chip.
+   *
+   * Two of these used to be a slab of dark green, which meant the header text had to be white — and white text
+   * on the other four states (bone) was simply invisible. One background, one text colour, and the status lives
+   * in a small coloured chip where it is legible in every state.
+   */
   const header = {
-    searching: { title: `Finding a ${meta.label.toLowerCase()}`, sub: "Nearby providers have your request. The first to accept gets the job.", bg: "bg-navy-gradient" },
-    matched: { title: `${h?.name ?? "Your provider"} is on the way`, sub: `${meta.label} · accepted at ${fmtTime(r.updatedAt)}`, bg: "bg-success-gradient" },
-    resolved: { title: "Job done", sub: "Thanks for using Sahaya", bg: "bg-success-gradient" },
-    cancelled: { title: "Request cancelled", sub: "Providers have been told", bg: "bg-navy-gradient" },
-    escalated: { title: "Still looking", sub: "No one has accepted yet", bg: "bg-navy-gradient" },
-    triaging: { title: "Sending…", sub: "", bg: "bg-navy-gradient" },
+    searching: { title: `Finding a ${meta.label.toLowerCase()}`, sub: "Nearby providers have your request. The first to accept gets the job.", chip: "Searching", tone: "bg-violet-soft text-violet-deep" },
+    matched:   { title: `${h?.name ?? "Your provider"} is on the way`, sub: `${meta.label} · accepted at ${fmtTime(r.updatedAt)}`, chip: "On the way", tone: "bg-positive-soft text-positive" },
+    resolved:  { title: "Job done", sub: "Thanks for using Sahaya", chip: "Completed", tone: "bg-positive-soft text-positive" },
+    cancelled: { title: "Request cancelled", sub: "Providers have been told", chip: "Cancelled", tone: "bg-bone text-mist" },
+    escalated: { title: "Still looking", sub: "No one has accepted yet", chip: "Still looking", tone: "bg-warn-soft text-warn" },
+    triaging:  { title: "Sending…", sub: "", chip: "Sending", tone: "bg-bone text-mist" },
   }[r.status];
 
   const markers: MapMarker[] = [];
@@ -86,22 +93,23 @@ export function ServiceRequestView({ id, onClose }: { id: string; onClose: () =>
 
   return (
     <>
-      <div className={header.bg}>
+      <div className="bg-navy-gradient">
         <div className="mx-auto max-w-6xl">
           <NavBar title={meta.label} onBack={onClose} light action={
             <span className="card-shadow flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-ink"><PulsingDot color={connected ? "green" : "red"} />{connected ? "LIVE" : "…"}</span>} />
         </div>
         <div className="px-5 pb-6 text-center">
           <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white card-shadow" style={{ color: meta.color }}>{meta.icon}</div>
-          <h2 className="font-display text-2xl font-bold text-white">{header.title}</h2>
-          <p className="mt-1 text-sm text-white/80">{header.sub}</p>
+          <span className={`mb-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ${header.tone}`}>{header.chip}</span>
+          <h2 className="font-display text-2xl font-extrabold tracking-tight text-ink">{header.title}</h2>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-mist">{header.sub}</p>
         </div>
       </div>
 
       <main className="mx-auto grid w-full max-w-6xl flex-1 content-start gap-4 px-4 py-4 md:px-8 lg:grid-cols-2 lg:items-start">
         <div className="flex flex-col gap-4">
           <section className="card-shadow rounded-2xl border border-slate-100 bg-white p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-resq-slate">Your request</p>
+            <p className="text-xs font-bold text-mist">Your request</p>
             <p className="mt-1 text-sm text-resq-navy">“{r.description}”</p>
             <p className="mt-2 text-xs text-resq-slate">Sent {fmtTime(r.createdAt)}{r.location ? " · your location is shared with the provider who accepts" : ""}</p>
           </section>
