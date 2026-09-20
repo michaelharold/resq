@@ -89,8 +89,8 @@ ollama --version    # https://ollama.com/download
 ### 2. Clone and install
 
 ```bash
-git clone https://github.com/michaelharold/resq.git sahaya
-cd sahaya
+git clone https://github.com/michaelharold/Sahaya.git
+cd Sahaya
 npm install
 ```
 
