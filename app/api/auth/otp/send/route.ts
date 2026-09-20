@@ -20,5 +20,5 @@ export const POST = safe(async (req: Request) => {
     return jsonError(502, "sms_failed", { detail: r.detail ?? "unknown" });
   }
   rate.set(phone, Date.now()); // only rate-limit codes that actually went out
-  return json({ ok: true, phone, channel: r.channel, expiresInSec: OTP_TTL_SEC, ...(r.devCode ? { devCode: r.devCode } : {}) });
+  return json({ ok: true, phone, channel: r.channel, expiresInSec: OTP_TTL_SEC, ...(r.devCode ? { devCode: r.devCode } : {}), ...(r.devReason ? { devReason: r.devReason } : {}) });
 });

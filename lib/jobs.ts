@@ -96,6 +96,18 @@ export async function markAssigned(id: string, worker: { id: string; phone: stri
   return r.modifiedCount === 1;
 }
 
+/**
+ * Record HOW a job was accepted, independently of who wrote the ASSIGNED row first.
+ *
+ * The mirror below runs synchronously off emit("request:updated") inside acceptLocked, so it reaches MongoDB
+ * BEFORE claim() has even returned to the SMS webhook. Whoever loses that race would otherwise have their channel
+ * silently discarded, and every SMS acceptance would be filed as "app" — which is exactly backwards for the one
+ * statistic this field exists to report.
+ */
+export async function setAssignedVia(id: string, via: "app" | "sms"): Promise<void> {
+  await (await jobsCollection()).updateOne({ _id: id, status: "ASSIGNED" }, { $set: { assignedVia: via, updatedAt: new Date() } });
+}
+
 /** Keep MongoDB in step with the live engine (accepted in the app, completed, cancelled). Registered once per process. */
 export function registerJobMirror(): void {
   if (g.__resq_jobs_mirror) return;
@@ -110,7 +122,8 @@ export function registerJobMirror(): void {
     try {
       if (r.status === "matched" && r.matchedHelperId) {
         const h = await getStore().getHelper(r.matchedHelperId);
-        if (h) await markAssigned(r.id, { id: h.id, phone: h.phone }, "app"); // no-op if the SMS webhook already did it
+        // "app" is the assumption; an SMS acceptance corrects it with setAssignedVia() once claim() returns.
+        if (h) await markAssigned(r.id, { id: h.id, phone: h.phone }, "app");
       } else if (r.status === "resolved" || r.status === "cancelled") {
         await (await jobsCollection()).updateOne({ _id: r.id, status: { $in: ["OPEN", "ASSIGNED"] } }, { $set: { status: r.status === "resolved" ? "COMPLETED" : "CANCELLED", updatedAt: new Date() } });
       }

@@ -2,10 +2,16 @@
  * In-process store. Reads and writes are structuredClone'd so callers never share references.
  * No database was purchased, so user accounts (helpers: name, phone, skills, reliability) are saved to a local
  * JSON file when `persistPath` is set, and reloaded at boot. Requests and dispatches stay in memory.
+ *
+ * Payments and reimbursements sit in Maps beside them but are written through to persistence like accounts are,
+ * because they are money and have to survive a restart. markPaymentPaid() is the one method whose atomicity is
+ * load-bearing: Razorpay reports the same payment twice (browser callback and webhook, in whichever order they
+ * land), so the "created" -> "paid" flip happens in one synchronous block with no await inside it and the second
+ * caller is handed alreadyPaid: true, which is its instruction to credit nobody.
  */
 import { JsonFilePersistence, type Changes, type Persistence } from "./persist";
-import type { AuditEntry, Authority, Dispatch, Helper, HelpRequest, LatLng, Otp, Rating, UserLocation, Zone } from "../types";
-import type { AcceptResult, Store } from "./index";
+import type { AuditEntry, Authority, Dispatch, Helper, HelpRequest, LatLng, Otp, Payment, Rating, Reimbursement, UserLocation, Zone } from "../types";
+import type { AcceptResult, MarkPaidResult, Store } from "./index";
 import { seedHelpers, seedResidents } from "../../scripts/seed";
 import { getSeedCenter } from "../dispatch";
 
@@ -24,10 +30,13 @@ export class MemoryStore implements Store {
   private locations = new Map<string, UserLocation>();
   private zones = new Map<string, Zone>();
   private authorities = new Map<string, Authority>();
+  private payments = new Map<string, Payment>();
+  private reimbursements = new Map<string, Reimbursement>();
   private auditLog: AuditEntry[] = [];
   private persistence: Persistence | null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
-  private dirty = { helpers: new Set<string>(), locations: new Set<string>(), deletedLocations: new Set<string>(), zones: new Set<string>(), authorities: new Set<string>(), audit: [] as AuditEntry[] };
+  private dirty = { helpers: new Set<string>(), locations: new Set<string>(), deletedLocations: new Set<string>(), zones: new Set<string>(), authorities: new Set<string>(),
+    payments: new Set<string>(), reimbursements: new Set<string>(), audit: [] as AuditEntry[] };
   /** Resolves once saved data has been loaded; every public method awaits it (before any check, so accept stays atomic). */
   private ready: Promise<void>;
 
@@ -52,9 +61,25 @@ export class MemoryStore implements Store {
       for (const l of saved.locations ?? []) if (l?.phone && l.source !== "seed") this.locations.set(l.phone, l);
       for (const z of saved.zones ?? []) if (z?.id) this.zones.set(z.id, z);
       for (const a of saved.authorities ?? []) if (a?.username) this.authorities.set(a.username, a);
+      // Money records outlive the requests they belong to (those are never persisted): they are the audit trail.
+      for (const p of saved.payments ?? []) if (p?.id) this.payments.set(p.id, p);
+      for (const r of saved.reimbursements ?? []) if (r?.id) this.reimbursements.set(r.id, r);
       this.auditLog = (saved.audit ?? []).slice(0, 500);
-      // Accounts come back off duty: nobody should be pinged until they reopen the app and go on duty again.
-      for (const h of saved.helpers ?? []) if (h && typeof h.id === "string" && !SEEDED.test(h.id)) this.helpers.set(h.id, { ...h, onDuty: false });
+      /**
+       * Accounts come back exactly as they were left, including on duty.
+       *
+       * This used to force every restored account to onDuty:false, on the reasoning that nobody should be pinged
+       * until they reopen the app. Two things were wrong with it. It was asymmetric — seeded providers are
+       * re-seeded on duty, so after a restart the demo data kept working while every real account went quiet —
+       * and the reset was never written back, so MongoDB went on reporting onDuty:true while the engine that
+       * decides who gets a job disagreed. A provider was then invisible to dispatch with nothing on their own
+       * screen or in the database to explain it.
+       *
+       * Silently switching a worker off is the one failure this product cannot afford: it costs them income and
+       * gives them no way to notice. getOnDutyHelpers() still requires a known location, so an account with no
+       * position is not pinged regardless, and a provider who genuinely wants to stop taps Pause.
+       */
+      for (const h of saved.helpers ?? []) if (h && typeof h.id === "string" && !SEEDED.test(h.id)) this.helpers.set(h.id, { ...h });
       console.log(`[store] loaded ${saved.helpers?.length ?? 0} users from ${this.persistence.name}`);
     } catch (e) {
       console.error(`[store] could not load from ${this.persistence.name}; continuing in memory`, e);
@@ -65,21 +90,23 @@ export class MemoryStore implements Store {
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
       const d = this.dirty;
-      this.dirty = { helpers: new Set(), locations: new Set(), deletedLocations: new Set(), zones: new Set(), authorities: new Set(), audit: [] };
+      this.dirty = { helpers: new Set(), locations: new Set(), deletedLocations: new Set(), zones: new Set(), authorities: new Set(), payments: new Set(), reimbursements: new Set(), audit: [] };
       const pick = <T,>(m: Map<string, T>, ids: Set<string>) => [...ids].map((id) => m.get(id)).filter((x): x is T => !!x).map((x) => c(x));
       const changes: Changes = {
         helpers: pick(this.helpers, d.helpers).filter((h) => this.persistence?.name.startsWith("MongoDB") || !SEEDED.test(h.id)),
         locations: pick(this.locations, d.locations).filter((l) => l.source !== "seed"),
         deletedLocations: [...d.deletedLocations], zones: pick(this.zones, d.zones), authorities: pick(this.authorities, d.authorities), audit: d.audit,
+        payments: pick(this.payments, d.payments), reimbursements: pick(this.reimbursements, d.reimbursements),
         full: {
           helpers: [...this.helpers.values()].filter((h) => !SEEDED.test(h.id)), locations: [...this.locations.values()].filter((l) => l.source !== "seed"),
           zones: [...this.zones.values()], authorities: [...this.authorities.values()], audit: this.auditLog.slice(0, 500),
+          payments: [...this.payments.values()], reimbursements: [...this.reimbursements.values()],
         },
       };
       this.persistence!.flush(changes).catch((e) => console.error(`[store] save to ${this.persistence!.name} failed`, e));
     }, 300);
   }
-  private touch(kind: "helpers" | "locations" | "zones" | "authorities", id: string) { this.dirty[kind].add(id); if (kind === "locations") this.dirty.deletedLocations.delete(id); this.save(); }
+  private touch(kind: "helpers" | "locations" | "zones" | "authorities" | "payments" | "reimbursements", id: string) { this.dirty[kind].add(id); if (kind === "locations") this.dirty.deletedLocations.delete(id); this.save(); }
 
   async upsertHelper(h: Helper) { await this.ready; this.helpers.set(h.id, c(h)); this.touch("helpers", h.id); return c(h); }
   async getHelper(id: string) { await this.ready; const h = this.helpers.get(id); return h ? c(h) : null; }
@@ -138,6 +165,15 @@ export class MemoryStore implements Store {
     const r = this.requests.get(d.requestId);
     if (!r) return { ok: false, reason: "not_found" };
     if (r.status !== "searching" && r.status !== "escalated") return { ok: false, reason: "already_matched" };
+    // "One job at a time" is a per-HELPER invariant, so it has to be decided HERE, in the same synchronous
+    // critical section that assigns the request — not in lib/waves.ts. That lock is per-REQUEST: two different
+    // jobs take two different locks, so a worker accepting both at the same instant (app on one, SMS reply on the
+    // other) passes both pre-checks and wins both. Scanning the map costs nothing and cannot interleave.
+    for (const other of this.requests.values()) {
+      if (other.id !== r.id && other.status === "matched" && other.matchedHelperId === d.helperId) {
+        return { ok: false, reason: "busy" };
+      }
+    }
     const now = new Date().toISOString();
     d.status = "accepted"; d.respondedAt = now;
     r.status = "matched"; r.matchedHelperId = d.helperId; r.waveStartedAt = null; r.updatedAt = now;
@@ -163,6 +199,52 @@ export class MemoryStore implements Store {
     }
     this.otps.delete(phone);
     return true;
+  }
+
+  // ── Money: payments and receipt reimbursements ─────────────────────────────────────────────────────────────
+  async createPayment(p: Payment) { await this.ready; this.payments.set(p.id, c(p)); this.touch("payments", p.id); return c(p); }
+  async getPayment(id: string) { await this.ready; const p = this.payments.get(id); return p ? c(p) : null; }
+  async getPaymentByOrderId(orderId: string) { await this.ready;
+    for (const p of this.payments.values()) if (p.orderId === orderId) return c(p);
+    return null;
+  }
+  async listPaymentsForRequest(requestId: string) { await this.ready;
+    return [...this.payments.values()].filter((p) => p.requestId === requestId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((p) => c(p));
+  }
+  /** requestId is pinned: a payment belongs to the job it was raised for, and retries create new records. */
+  async updatePayment(id: string, patch: Partial<Payment>) { await this.ready;
+    const p = this.payments.get(id);
+    if (!p) return null;
+    Object.assign(p, c(patch), { id, requestId: p.requestId });
+    this.touch("payments", id);
+    return c(p);
+  }
+
+  /**
+   * Atomic: no await between the read and the write, so two notifications for one payment cannot both win.
+   * A "failed" attempt the gateway later confirms does flip — the gateway is the authority on whether money moved.
+   * A refunded payment answers alreadyPaid: true, which tells the caller to credit nobody rather than credit twice.
+   */
+  async markPaymentPaid(id: string, paymentId: string): Promise<MarkPaidResult> { await this.ready;
+    const p = this.payments.get(id);
+    if (!p) return { ok: false, reason: "not_found" };
+    if (p.status !== "created" && p.status !== "failed") return { ok: true, payment: c(p), alreadyPaid: true };
+    p.status = "paid"; p.paymentId = paymentId; p.paidAt = new Date().toISOString(); p.error = null;
+    this.touch("payments", id);
+    return { ok: true, payment: c(p), alreadyPaid: false };
+  }
+
+  async createReimbursement(r: Reimbursement) { await this.ready; this.reimbursements.set(r.id, c(r)); this.touch("reimbursements", r.id); return c(r); }
+  async getReimbursement(id: string) { await this.ready; const r = this.reimbursements.get(id); return r ? c(r) : null; }
+  async listReimbursements(requestId: string) { await this.ready;
+    return [...this.reimbursements.values()].filter((r) => r.requestId === requestId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((r) => c(r));
+  }
+  async updateReimbursement(id: string, patch: Partial<Reimbursement>) { await this.ready;
+    const r = this.reimbursements.get(id);
+    if (!r) return null;
+    Object.assign(r, c(patch), { id, requestId: r.requestId });
+    this.touch("reimbursements", id);
+    return c(r);
   }
 
   // ── Disaster response ──────────────────────────────────────────────────────────────────────────────────────

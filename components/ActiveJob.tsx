@@ -1,14 +1,25 @@
 "use client";
-/* The job a user accepted: full requester details, live map to them, call buttons, done. */
+/*
+ * The job a user accepted: full requester details, live map to them, call buttons, and the end of the job.
+ *
+ * "Mark as done" is no longer one tap on a paid service, and deliberately so. A worker who has just finished is
+ * standing in somebody's kitchen with their hands dirty, and that is the only moment they will reliably name a
+ * price: ask afterwards and the figure arrives by phone call, or not at all. So the button opens the charge step
+ * (WorkerMoneyPanel), the amount is stored server-side before the job is resolved, and the worker reads what it
+ * leaves them — work minus the platform fee, plus whatever parts the customer approved — before they close the
+ * job. Free emergencies and the fixed-fee micro-gigs keep the single tap they always had.
+ */
 import { JobBrief } from "./JobBrief";
 import { Icon } from "./icons";
 import { Badge } from "./ui";
 import { LiveMap, type MapMarker } from "./LiveMap";
 import { HazardBanner } from "./HazardBanner";
+import { WorkerMoneyPanel, type DoneSummary } from "./PaymentPanel";
+import { fmtRate } from "./ServiceRequestView";
 import { fmtDistance, distanceKm, type LatLng } from "@/lib/client/api";
 import { TYPE_LABELS, SKILL_LABELS } from "@/lib/taxonomy";
 import { GIG_TYPES, categoryOf, feeOf, formatMoney } from "@/lib/policy";
-import type { HelpRequest } from "@/lib/types";
+import type { HelpRequest, RateRange } from "@/lib/types";
 
 export function PersonDetails({ r }: { r: HelpRequest }) {
   const p = r.requesterProfile;
@@ -28,7 +39,10 @@ export function PersonDetails({ r }: { r: HelpRequest }) {
   );
 }
 
-export function ActiveJob({ r, mapsUrl, me, simulated, onDone }: { r: HelpRequest; mapsUrl: string | null; me: LatLng | null; simulated: boolean; onDone: () => void }) {
+export function ActiveJob({ r, mapsUrl, me, simulated, myRate, onDone }: {
+  r: HelpRequest; mapsUrl: string | null; me: LatLng | null; simulated: boolean; myRate: RateRange | null;
+  onDone: (summary: DoneSummary) => void | Promise<void>;
+}) {
   const dist = me && r.location ? distanceKm(me, r.location) : null;
   const arrived = dist !== null && dist < 0.05;
   const markers: MapMarker[] = [];
@@ -36,7 +50,8 @@ export function ActiveJob({ r, mapsUrl, me, simulated, onDone }: { r: HelpReques
   if (me) markers.push({ id: "me", at: me, color: "#16A34A", kind: "you", label: "You", pulse: false });
   const gig = categoryOf(r) === "HOUSEHOLD_MICROGIG";
   const gigLabel = gig ? (r.gigType ? GIG_TYPES[r.gigType].label : "Household job") : null;
-  const service = categoryOf(r) === "SERVICE" && r.service ? SKILL_LABELS[r.service] : null;
+  const paid = categoryOf(r) === "SERVICE";
+  const service = paid && r.service ? SKILL_LABELS[r.service] : null;
   return (
     <section className="card-shadow-lg animate-slide-up overflow-hidden rounded-2xl border-2 border-resq-green bg-white">
       <div className="bg-success-gradient px-5 py-4">
@@ -71,7 +86,11 @@ export function ActiveJob({ r, mapsUrl, me, simulated, onDone }: { r: HelpReques
           {mapsUrl && <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-resq-navy text-sm font-semibold text-white"><Icon.Navigation size={16} />Navigate</a>}
           {r.requesterPhone && <a href={`tel:${r.requesterPhone}`} className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-slate-200 text-sm font-semibold text-resq-navy"><Icon.Phone size={16} />Call</a>}
         </div>
-        <button onClick={onDone} className="min-h-14 w-full rounded-2xl bg-success-gradient font-display text-lg font-bold text-white">Mark as done</button>
+        {paid ? (
+          <WorkerMoneyPanel requestId={r.id} rateHint={myRate ? fmtRate(myRate) : null} customerName={r.requesterName ?? "The customer"} onDone={onDone} />
+        ) : (
+          <button onClick={() => void onDone(null)} className="min-h-14 w-full rounded-2xl bg-success-gradient font-display text-lg font-bold text-white">Mark as done</button>
+        )}
       </div>
     </section>
   );

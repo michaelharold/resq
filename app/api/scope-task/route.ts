@@ -21,7 +21,7 @@ import { findMatchingWorkers } from "@/lib/matching";
 import { ScopeError, scopeTask } from "@/lib/scope";
 import { sendSms, tplScopedJob } from "@/lib/sms";
 import { getStore } from "@/lib/store";
-import { MEDICAL_SERVICES, SKILL_LABELS, TOOL_LABELS, isService } from "@/lib/taxonomy";
+import { SKILL_LABELS, TOOL_LABELS, isService } from "@/lib/taxonomy";
 import { isLatLng, json, jsonError, readJson, safe, text } from "@/lib/validate";
 import { buildRequestView } from "@/lib/views";
 import { createServiceRequest } from "@/lib/waves";
@@ -82,25 +82,23 @@ export const POST = safe(async (req: Request) => {
     const location: LatLng | null = job.location ? { lat: job.location.coordinates[1], lng: job.location.coordinates[0] } : null;
     const scope = job.scope;
     const code = await openJob(job._id, answers);
-    // Booking medical help for yourself means you are not free to take jobs right now.
-    if (MEDICAL_SERVICES.includes(scope.category as never) && account.onDuty) {
-      const paused = await getStore().upsertHelper({ ...account, onDuty: false, availabilityPausedAt: new Date().toISOString() });
-      emit("helper:updated", { helper: paused });
-    }
     const request = await createServiceRequest({
       id: job._id, service: scope.category, description: job.rawDescription, location, account, notify: false,
       scope, shortCode: code, attachments: job.attachments, answers,
     });
 
-    // Dual dispatch: app open → live dashboard (SSE); app closed → SMS they can answer from any phone.
+    // Dual dispatch: the live dashboard AND a text, to everyone matched.
+    //
+    // This used to text only workers whose app was shut, on the theory that anyone looking at the screen has
+    // already seen it. That theory is wrong in the one situation that matters: "online" here means an SSE stream
+    // is open, which is true of a phone lying face-down in a toolbag. The person is not watching. A duplicate
+    // text costs a fraction of a rupee; a missed job costs someone a day's work, so the text always goes.
     const match = location ? await findMatchingWorkers({ location, scope, excludeId: account.id }) : { workers: [], toolMatch: "none" as const };
     const now = new Date().toISOString();
     const records: MatchedWorkerRecord[] = [];
     for (const w of match.workers) {
-      if (!w.online) {
-        void sendSms(w.phone, tplScopedJob({ category: SKILL_LABELS[scope.category], title: scope.parsedTitle, minutes: scope.estimatedTimeMinutes,
-          tools: scope.requiredTools.map((t) => TOOL_LABELS[t]), code, distanceKm: w.distanceKm }));
-      }
+      void sendSms(w.phone, tplScopedJob({ category: SKILL_LABELS[scope.category], title: scope.parsedTitle, minutes: scope.estimatedTimeMinutes,
+        tools: scope.requiredTools.map((t) => TOOL_LABELS[t]), code, distanceKm: w.distanceKm }));
       records.push({ workerId: w.id, name: w.name, distanceKm: w.distanceKm, toolsMatched: w.toolsMatched, channel: w.online ? "sse" : "sms", notifiedAt: now });
     }
     await recordMatches(job._id, records, match.toolMatch);

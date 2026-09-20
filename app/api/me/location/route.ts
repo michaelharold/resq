@@ -1,6 +1,7 @@
 /** Signed-in users share their location every ~30 s so authorities can find them inside a disaster zone. */
 import { getHelperSession } from "@/lib/auth";
 import { getStore } from "@/lib/store";
+import { withHelperLock } from "@/lib/escrow";
 import { isLatLng, json, jsonError, readJson, safe } from "@/lib/validate";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +21,15 @@ export const POST = safe(async (req: Request) => {
     accuracyM: typeof accuracyM === "number" ? Math.round(accuracyM) : null, source: source === "demo" ? "demo" : "gps", updatedAt: new Date().toISOString(),
   });
   // Keep the account's own position current too, so nearby requests and dispatch use where the person is now.
-  if (helper) await store.upsertHelper({ ...helper, location, lastSeen: saved.updatedAt });
+  // Under the helper lock, re-reading inside it: `helper` was read before the recordLocation await, and this
+  // route fires every ~30 s. Writing that stale copy back would erase a wallet credit or a rating that landed in
+  // between — a worker losing their earnings to a routine GPS ping is not a tolerable failure.
+  if (helper) {
+    await withHelperLock(helper.id, async () => {
+      const fresh = await store.getHelper(helper.id);
+      if (fresh) await store.upsertHelper({ ...fresh, location, lastSeen: saved.updatedAt });
+    });
+  }
   return json({ ok: true, updatedAt: saved.updatedAt });
 });
 

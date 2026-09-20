@@ -6,8 +6,9 @@ import { INITIAL_RELIABILITY } from "@/lib/dispatch";
 import { HELPER_SESSION_MAX_AGE_SEC, SESSION_COOKIE, isSecureRequest, serializeCookie, sign } from "@/lib/session";
 import { normalizePhone } from "@/lib/sms";
 import { equipmentOf, isLatLng, json, jsonError, profileOf, ratesOf, readJson, safe, skillsOrEmpty, text, toolsOf, trustOf } from "@/lib/validate";
+import { isLanguage } from "@/lib/languages";
 import { withHelperLock } from "@/lib/escrow";
-import { walletOf } from "@/lib/policy";
+import { walletOf, walletPaiseOf } from "@/lib/policy";
 import { onReject } from "@/lib/waves";
 import type { Helper } from "@/lib/types";
 
@@ -17,7 +18,8 @@ export const dynamic = "force-dynamic";
  * POST /api/helpers — create or update an account (self-service with a session, or any helper as ops).
  * Upgrade fields: trustTier (TIER_1_NEIGHBOR default) and credentialId (3–40 chars, required for Tier 2 / Tier 3;
  * self-declared in the demo, nothing is verified). Absent fields keep the stored values.
- * walletBalance is NEVER read from the body, not even for ops: only an escrow release (lib/escrow.ts) credits it.
+ * Neither wallet is EVER read from the body, not even for ops: only an escrow release (lib/escrow.ts) or a
+ * settled payment (lib/payments.ts) credits them. Both are re-read from the stored record inside the lock.
  */
 export const POST = safe(async (req: Request) => {
   const ops = isOps(req);
@@ -73,8 +75,11 @@ export const POST = safe(async (req: Request) => {
     trustTier: trust.value.trustTier,
     credentialId: trust.value.credentialId,
     walletBalance: walletOf(fresh),
+    walletPaise: walletPaiseOf(fresh),
     rates: b.rates === undefined ? fresh?.rates ?? {} : rates.value,
     toolsOnHand: b.toolsOnHand === undefined ? fresh?.toolsOnHand ?? [] : tools,
+    // An unrecognised language is ignored rather than rejected: a bad value must never block someone saving a profile.
+    ...(isLanguage(b.language) ? { language: b.language } : fresh?.language ? { language: fresh.language } : {}),
     idProof: ops && typeof b.verified === "boolean"
       ? (b.verified ? { fileId: null, fileName: "verified by admin", mime: "", size: 0, uploadedAt: now, status: "verified" as const, reviewedBy: "admin", reviewedAt: now, note: null } : null)
       : fresh?.idProof ?? null,

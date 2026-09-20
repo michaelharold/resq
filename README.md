@@ -1,7 +1,7 @@
 # ResQ — trusted local help, one tap away
 
-> A community marketplace for local services: plumbers, electricians, carpenters, AC technicians, cleaners,
-> mechanics, doctors, nurses and caregivers from your own neighbourhood. Like Uber, but for local professionals
+> A community marketplace for local trades: plumbers, electricians, carpenters, AC technicians, appliance
+> repairers, painters, cleaners and mechanics from your own neighbourhood. Like Uber, but for local professionals
 > and skilled neighbours, so they earn directly from their skills.
 >
 > Built for Kraft Night 2026 (IEDC TKMCE).
@@ -10,7 +10,7 @@
 
 ## The problem
 
-When a pipe bursts, a fuse trips or an elderly parent needs a nurse, finding the right person nearby is slow and
+When a pipe bursts, a fuse trips or the AC dies in May, finding the right person nearby is slow and
 uncertain. You ask around, call numbers from old WhatsApp forwards, and hope. You cannot see **who is available
 right now**, **what they will charge**, or **whether they can be trusted**. Meanwhile the electrician two streets
 away has free hours and no simple way to find local work on his own terms.

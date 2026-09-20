@@ -33,18 +33,22 @@ export const SKILLS = [
   "caregiver",
 ] as const;
 
-/** Services a user can request with one tap, in display order. Each is also a skill a provider can offer. */
+/**
+ * Services a user can request with one tap, in display order. Each is also a skill a provider can offer.
+ *
+ * Trades only. doctor / nurse / caregiver were bookable here and are deliberately not any more: ResQ is a local
+ * trades marketplace, and dispatching medical care through it invites an expectation of clinical judgement the
+ * product has no business making. Those three remain in SKILLS below because the emergency triage tables still
+ * map need types onto them; they are simply not something a neighbour can book with a tap.
+ */
 export const SERVICES = [
   "plumber", "electrician", "carpenter", "ac_technician", "appliance_repair", "painter",
-  "cleaner", "mechanic", "doctor", "nurse", "caregiver",
+  "cleaner", "mechanic",
 ] as const satisfies readonly Skill[];
 export type Service = (typeof SERVICES)[number];
 export function isService(x: unknown): x is Service {
   return typeof x === "string" && (SERVICES as readonly string[]).includes(x);
 }
-/** Basic medical help: shown with a "call 112 for emergencies" note. */
-export const MEDICAL_SERVICES: readonly Service[] = ["doctor", "nurse", "caregiver"];
-
 export const NEED_TYPES = [
   "flood_rescue",
   "cardiac_no_breathing",
@@ -221,7 +225,4 @@ export const SERVICE_TOOLS: Record<Service, Tool[]> = {
   painter: ["paint_roller", "ladder", "sandpaper", "measuring_tape"],
   cleaner: ["vacuum_cleaner", "pressure_washer", "cleaning_kit"],
   mechanic: ["spanner_set", "tyre_inflator", "jumper_cables", "screwdriver_set"],
-  doctor: ["stethoscope", "bp_monitor", "thermometer", "glucometer", "first_aid_kit"],
-  nurse: ["bp_monitor", "thermometer", "glucometer", "first_aid_kit"],
-  caregiver: ["thermometer", "bp_monitor", "first_aid_kit"],
 };

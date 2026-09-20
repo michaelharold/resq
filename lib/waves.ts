@@ -9,7 +9,7 @@ import { emit } from "./events";
 import { NO_HAZARD } from "./hazards";
 import { getStore } from "./store";
 import { MAX_WAVES, TICK_GRACE_MS, WAVE_RADII_KM, haversineKm, selectWave, waveWindowMs } from "./dispatch";
-import { formatDistance, mapsUrl, sendSms, tplPing, tplRequesterEscalated, tplRequesterMatched, tplRequestClosed, tplServiceRequest } from "./sms";
+import { formatDistance, mapsUrl, sendSms, tplJobTaken, tplPing, tplRequesterEscalated, tplRequesterMatched, tplRequestClosed, tplServiceRequest } from "./sms";
 import { triage } from "./triage";
 import { inferRole } from "./role";
 import { releaseEscrowLocked, withHelperLock, type EscrowRelease } from "./escrow";
@@ -192,6 +192,20 @@ export type ServiceRequestInput = {
 };
 
 /**
+ * Who a service broadcast reaches by SMS: available providers of that service inside SERVICE_RADIUS_KM, nearest 10.
+ * It lives here rather than inline in createServiceRequest because notifyTaken has to answer the same question in
+ * reverse ("who did we tell about this job?") once somebody takes it, and the two answers must not drift apart.
+ */
+async function broadcastTargets(i: { service: Skill; location: LatLng; excludeHelperId: string | null }): Promise<{ helper: Helper; km: number }[]> {
+  return (await getStore().getOnDutyHelpers())
+    .filter((h) => h.id !== i.excludeHelperId && h.skills.includes(i.service) && h.location)
+    .map((h) => ({ helper: h, km: haversineKm(i.location, h.location!) }))
+    .filter((x) => x.km <= SERVICE_RADIUS_KM)
+    .sort((a, b) => a.km - b.km)
+    .slice(0, 10);
+}
+
+/**
  * A user tapped a service (plumber, electrician, doctor…) and described the problem. The request is broadcast to
  * every available provider of that service within SERVICE_RADIUS_KM (their dashboard updates live; the nearest 10
  * also get an SMS). It stays open until one of them accepts: no waves, no escalation.
@@ -216,13 +230,8 @@ export async function createServiceRequest(input: ServiceRequestInput): Promise<
   });
   emit("request:updated", { request });
   if (input.location && input.notify !== false) {
-    const providers = (await store.getOnDutyHelpers())
-      .filter((h) => h.id !== input.account.id && h.skills.includes(input.service) && h.location)
-      .map((h) => ({ h, km: haversineKm(input.location!, h.location!) }))
-      .filter((x) => x.km <= SERVICE_RADIUS_KM)
-      .sort((a, b) => a.km - b.km)
-      .slice(0, 10);
-    for (const { h, km } of providers) void sendSms(h.phone, tplServiceRequest({ service: input.service, distanceKm: km }));
+    for (const { helper, km } of await broadcastTargets({ service: input.service, location: input.location, excludeHelperId: input.account.id }))
+      void sendSms(helper.phone, tplServiceRequest({ service: input.service, distanceKm: km }));
   }
   return request;
 }
@@ -346,6 +355,9 @@ async function acceptLocked(dispatchId: string, via: Channel): Promise<AcceptRes
     const skill = h && request.triage ? request.triage.skills.find((s) => h.skills.includes(s)) ?? h.skills[0] ?? request.triage.skills[0] : null;
     if (h && skill) void sendSms(request.requesterPhone, tplRequesterMatched({ name: h.name, skill, distanceKm: dispatch.distanceKm, phone: h.phone }));
   }
+  // The job is off the market: tell everyone else who was alerted. Not awaited, so a slow SMS gateway neither
+  // holds the request lock open nor can fail an accept that has already happened.
+  void notifyTaken(request, dispatch.helperId);
   return { ok: true as const, request, dispatch, location: request.location, mapsUrl: request.location ? mapsUrl(request.location) : null, requesterPhone: request.requesterPhone };
 }
 
@@ -390,6 +402,57 @@ export async function decline(requestId: string, helperId: string): Promise<void
 }
 
 type Simple = { ok: true; request: HelpRequest } | { ok: false; reason: "conflict" | "not_found" };
+
+/**
+ * Somebody took this job, so it must stop existing for everyone else. In the app that is already true — the feed
+ * only lists "searching" requests and every dashboard is re-pushed on request:updated — but a provider who was
+ * alerted by SMS has no feed: the text in their inbox is the whole job, and it keeps inviting them to reply ACCEPT
+ * long after the work is gone. This closes that gap.
+ *
+ * The recipients are everyone the alert could have reached: helpers with a dispatch on the request (the wave pings),
+ * the providers a service broadcast covers, and, for an AI-scoped job, the offline workers the scope-task dispatcher
+ * texted (recorded in MongoDB, so it is imported lazily and its failure is never allowed to matter). A service
+ * broadcast keeps no roster, so that set is recomputed and may have drifted — someone who came on duty since could
+ * get a notice about a job they never heard of. That is the right way to be wrong: a stray "nothing for you to do"
+ * costs one SMS, while a missed one leaves a worker holding a dead job. Fire-and-forget; never throws.
+ */
+async function notifyTaken(r: HelpRequest, winnerHelperId: string): Promise<void> {
+  try {
+    const store = getStore();
+    const winner = await store.getHelper(winnerHelperId);
+    const label = r.service ? SKILL_LABELS[r.service] : r.triage ? TYPE_SMS_LABELS[r.triage.type] : "help";
+    const skipPhones = new Set([winner?.phone, r.requesterPhone].filter((p): p is string => !!p));
+    const out = new Map<string, number | null>(); // phone → distance for the wording; a phone is texted at most once
+    const add = (phone: string | null | undefined, km: number | null, helperId: string | null) => {
+      if (!phone || skipPhones.has(phone)) return;
+      if (helperId && (helperId === winnerHelperId || helperId === r.requesterHelperId || hasDeclined(r.id, helperId))) return;
+      if (!out.has(phone)) out.set(phone, km);
+    };
+    for (const d of await store.listDispatches(r.id)) {
+      if (d.status === "rejected") continue; // they already said no; do not text them again
+      add((await store.getHelper(d.helperId))?.phone, d.distanceKm, d.helperId);
+    }
+    // A scoped job is dispatched by /api/scope-task (notify: false), never broadcast, so the two are exclusive.
+    if (r.service && r.location && !r.shortCode) {
+      for (const t of await broadcastTargets({ service: r.service, location: r.location, excludeHelperId: r.requesterHelperId }))
+        add(t.helper.phone, t.km, t.helper.id);
+    }
+    if (r.shortCode) {
+      try {
+        const job = await (await import("./jobs")).getJob(r.id);
+        for (const w of job?.matchedWorkers ?? []) {
+          if (w.channel !== "sms") continue; // workers with the app open watched it disappear from their dashboard
+          add((await store.getHelper(w.workerId))?.phone, w.distanceKm, w.workerId);
+        }
+      } catch (e) {
+        console.error("[waves] taken notice: scoped-job lookup failed", e);
+      }
+    }
+    for (const [phone, km] of out) void sendSms(phone, tplJobTaken({ label, distanceKm: km }));
+  } catch (e) {
+    console.error("[waves] taken notice failed", e);
+  }
+}
 
 /**
  * A request is closed (done or cancelled): the app feeds drop it on the next snapshot, and everyone who was pinged

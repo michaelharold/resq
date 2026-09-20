@@ -3,17 +3,22 @@
  * ResQ — a local-services community ("Uber for neighbours and local professionals").
  *   sign in (phone + code) → profile (details, services you offer with a price range, ID proof) → home
  *   home: tap a service (Plumber, Electrician, Doctor…) → describe the problem → nearby providers get it live
- *         → one accepts → call / message / live map → done → pay (placeholder) + rate
+ *         → one accepts → call / message / live map → they name their charge → pay in app (Razorpay) + rate
  *   providers: "Requests for you" with the requester's details → Accept / Not now → one job at a time
+ *
+ * The money lives in components/PaymentPanel.tsx on both sides; this file only routes between screens and, when a
+ * provider closes a job, repeats back the figures the server computed for the charge.
  */
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { Badge, Container, Logo, NavBar, PhoneShell, PulsingDot, initials } from "@/components/ui";
 import { SKILL_META } from "@/components/skills";
+import { tintOf } from "@/lib/theme";
 import { OtpForm } from "@/components/OtpForm";
 import { BeaconChip } from "@/components/BeaconChip";
 import { ActiveJob, PersonDetails, beep } from "@/components/ActiveJob";
+import type { DoneSummary } from "@/components/PaymentPanel";
 import { ServiceRequestView, Stars, VerifiedBadge, fmtRate, type ProviderPreview } from "@/components/ServiceRequestView";
 import { VoiceMic } from "@/components/VoiceMic";
 import { TaskScopeModal } from "@/components/TaskScopeModal";
@@ -22,8 +27,12 @@ import { DEMO_RADIUS_KM, api, demoSpot, distanceKm, fmtDistance, fmtTime, getHel
 import { useLocationBeacon } from "@/lib/client/beacon";
 import { useSnapshot } from "@/lib/client/sse";
 import { speechErrorText, useSpeech } from "@/lib/client/speech";
-import { BLOOD_GROUPS, MEDICAL_SERVICES, SERVICES, SERVICE_TOOLS, TOOL_LABELS, type Service } from "@/lib/taxonomy";
-import { isVerified } from "@/lib/policy";
+import { MAX_RECORD_SECONDS, recorderErrorText, useRecorder } from "@/lib/client/recorder";
+import { languageLabel, languageOf, type LanguageCode } from "@/lib/languages";
+import { LanguagePicker, LanguageNote } from "@/components/LanguagePicker";
+import { VoiceNotes } from "@/components/VoiceNotes";
+import { BLOOD_GROUPS, SERVICES, SERVICE_TOOLS, TOOL_LABELS, type Service } from "@/lib/taxonomy";
+import { isVerified, rateFor } from "@/lib/policy";
 import type { Dashboard, FeedItem } from "@/lib/feed";
 import type { Helper, RateRange, RequestView, Skill, Tool, UserProfile } from "@/lib/types";
 
@@ -122,6 +131,7 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
     return o;
   });
   const [file, setFile] = useState<File | null>(null);
+  const [language, setLanguage] = useState<LanguageCode>(languageOf(me?.language).code);
   const [tools, setTools] = useState<Tool[]>(me?.toolsOnHand ?? []);
   const [available, setAvailable] = useState(me ? me.onDuty : true);
   const [busy, setBusy] = useState(false);
@@ -142,7 +152,7 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
     const rateBody: Partial<Record<Skill, RateRange>> = {};
     for (const s of offered) rateBody[s] = { min: Number(rates[s]!.min), max: Number(rates[s]!.max) };
     const r = await api<{ token?: string; helper: Helper }>("/api/helpers", {
-      body: { name, phone, skills: [...otherSkills, ...offered], rates: rateBody, toolsOnHand: tools.filter((t) => offered.some((s) => SERVICE_TOOLS[s].includes(t))),
+      body: { name, phone, language, skills: [...otherSkills, ...offered], rates: rateBody, toolsOnHand: tools.filter((t) => offered.some((s) => SERVICE_TOOLS[s].includes(t))),
         profile: { ...profile, age: profile.age ? Number(profile.age) : null } },
     });
     if (!r.ok) { setBusy(false); setMsg(`Please check your details (${r.error.replace(/_/g, " ")}).`); setStep(0); return; }
@@ -184,6 +194,11 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
         {step === 0 && (
           <div className="grid gap-4 sm:grid-cols-2">
             <p className="text-sm text-resq-slate sm:col-span-2">Signed in as <strong>{phone}</strong>. Your details are shared only with the person on the other side of a job you both agreed to.</p>
+            <div className="sm:col-span-2">
+              <p className="text-sm font-semibold text-resq-navy">Your language</p>
+              <LanguagePicker value={language} onChange={setLanguage} className="mt-2" />
+              <LanguageNote code={language} />
+            </div>
             <label className="text-sm font-semibold text-resq-navy sm:col-span-2">Full name *<input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoComplete="name" className={input} /></label>
             <label className="text-sm font-semibold text-resq-navy">Age<input type="number" inputMode="numeric" min={1} max={120} value={profile.age} onChange={set("age")} className={input} /></label>
             <label className="text-sm font-semibold text-resq-navy">Blood group <span className="font-normal text-resq-slate">(for medical help)</span>
@@ -239,7 +254,7 @@ function Onboarding({ phone, me, center, editing, onDone, onCancel }: {
                     const on = tools.includes(t);
                     return (
                       <button key={t} onClick={() => setTools(on ? tools.filter((x) => x !== t) : [...tools, t])} aria-pressed={on}
-                        className={`flex min-h-11 items-center gap-1.5 rounded-xl border-2 px-3 text-sm font-semibold ${on ? "border-resq-cyan bg-resq-cyan-light text-resq-cyan" : "border-slate-200 bg-white text-resq-slate"}`}>
+                        className={`flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-colors ${on ? "bg-ink text-white" : "bg-surface text-mist card-shadow"}`}>
                         {on && <Icon.Check size={14} />}{TOOL_LABELS[t]}
                       </button>
                     );
@@ -303,6 +318,8 @@ function Home({ initial, config, onService, onOpenRequest, onProfile, onSignOut 
   const [summary, setSummary] = useState<ServiceSummary[] | null>(null);
   const [open, setOpen] = useState<FeedItem | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // Held locally so the header switches the moment it is tapped; the server copy is the source of truth on reload.
+  const [lang, setLang] = useState<LanguageCode>(languageOf(me.language).code);
   const seen = useRef<Set<string>>(new Set(initial.feed.map((f) => f.request.id)));
   const pos = useRef<LatLng | null>(me.location);
   pos.current = me.location ?? pos.current;
@@ -359,33 +376,43 @@ function Home({ initial, config, onService, onOpenRequest, onProfile, onSignOut 
     void reload();
   };
   const notNow = async (f: FeedItem) => { await api(`/api/requests/${f.request.id}/decline`, { method: "POST" }); setOpen(null); void reload(); };
-  const done = async () => { if (dash.active) { await api(`/api/requests/${dash.active.request.id}`, { method: "PATCH", body: { action: "resolve" } }); setToast("Job marked as done. Collect payment from the customer."); void reload(); } };
+  // Closing the job. On a paid service the charge is already stored (ActiveJob posted it first), so the
+  // confirmation repeats the server's own figures rather than telling anyone to collect cash at the door.
+  const done = async (summary: DoneSummary) => {
+    if (!dash.active) return;
+    const r = await api(`/api/requests/${dash.active.request.id}`, { method: "PATCH", body: { action: "resolve" } });
+    setToast(!r.ok ? "Could not close that job. Try again."
+      : summary ? `Job done. ${summary.grossPretty} is now on ${dash.active.request.requesterName ?? "the customer"}'s screen to pay; ${summary.payoutPretty} reaches your ResQ wallet the moment they do.`
+      : "Job marked as done.");
+    void reload();
+  };
   const signOut = async () => { await api("/api/auth/logout", { method: "POST", body: {} }); document.title = "ResQ"; onSignOut(); };
 
   return (
     <>
       <div className="bg-navy-gradient">
         <Container className="px-5 pb-6 pt-5 md:px-8">
-          <div className="flex items-start justify-between gap-3">
-            <button onClick={onProfile} className="flex items-center gap-3 text-left">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-resq-cyan to-resq-navy font-bold text-white">{initials(me.name)}</div>
-              <div>
-                <p className="text-sm text-white/60">Hello,</p>
-                <h1 className="font-display text-xl font-bold text-white">{me.name}</h1>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <button onClick={onProfile} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet to-violet-deep font-extrabold text-white">{initials(me.name)}</div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-mist">Hello,</p>
+                <h1 className="truncate font-display text-2xl font-extrabold tracking-tight text-ink">{me.name}</h1>
                 {isProvider && <div className="mt-1"><VerifiedBadge verified={isVerified(me)} pending={me.idProof?.status === "pending"} /></div>}
               </div>
             </button>
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 rounded-xl bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-white"><PulsingDot color={connected ? "green" : "red"} />{connected ? "Live" : "…"}</span>
-              <button onClick={onProfile} className="min-h-10 rounded-xl border border-white/20 px-3 text-xs font-semibold text-white">Profile</button>
-              <button onClick={signOut} className="min-h-10 rounded-xl border border-white/20 px-3 text-xs font-semibold text-white">Sign out</button>
+            <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              <span className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-ink card-shadow"><PulsingDot color={connected ? "green" : "red"} />{connected ? "Live" : "…"}</span>
+              <LanguagePicker value={lang} onChange={setLang} variant="compact" />
+              <button onClick={onProfile} className="min-h-10 rounded-full bg-white px-4 text-xs font-semibold text-ink card-shadow">Profile</button>
+              <button onClick={signOut} className="min-h-10 rounded-full bg-white px-4 text-xs font-semibold text-mist card-shadow">Sign out</button>
             </div>
           </div>
         </Container>
       </div>
 
       {dash.active ? (
-        <JobMode active={dash.active} me={me} simulated={beacon.source !== "gps"} waiting={dash.hiddenWhileBusy} toast={toast} onDismissToast={() => setToast(null)} onDone={done} />
+        <JobMode active={dash.active} me={me} lang={lang} simulated={beacon.source !== "gps"} waiting={dash.hiddenWhileBusy} toast={toast} onDismissToast={() => setToast(null)} onDone={done} />
       ) : (
         <main className="mx-auto grid w-full max-w-6xl flex-1 content-start gap-5 px-4 py-5 md:px-8 lg:grid-cols-[1.25fr_1fr] lg:items-start">
           <div className="flex flex-col gap-4">
@@ -400,16 +427,32 @@ function Home({ initial, config, onService, onOpenRequest, onProfile, onSignOut 
               </button>
             )}
             <section>
-              <h2 className="font-display text-xl font-bold text-resq-navy">What do you need help with?</h2>
-              <p className="mb-3 text-sm text-resq-slate">Tap a service. Nearby providers get your request instantly.</p>
+              <h2 className="font-display text-[1.5rem] font-extrabold leading-[1.08] tracking-tight text-ink min-[400px]:text-[1.75rem] sm:text-[2.125rem]">
+                Whatever&apos;s broken,<br /><span className="display-italic">someone nearby can fix it</span>
+              </h2>
+              <p className="mb-4 mt-2 text-sm text-mist">Tap a trade. Everyone nearby who does it gets your request at once.</p>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {SERVICES.map((s) => {
                   const m = SKILL_META[s], sum = summary?.find((x) => x.service === s);
                   return (
-                    <button key={s} onClick={() => onService(s)} className="card-shadow flex min-h-28 flex-col items-start rounded-2xl border border-slate-100 bg-white p-4 text-left transition-transform active:scale-[.98]">
-                      <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-2xl" style={{ background: m.bg, color: m.color }}>{m.icon}</div>
-                      <p className="font-display font-bold text-resq-navy">{m.label}</p>
-                      <p className="text-xs text-resq-slate">{sum ? (sum.count ? `${sum.count} nearby${sum.minRate !== null ? ` · ₹${sum.minRate}–₹${sum.maxRate}` : ""}` : "None nearby yet") : "…"}</p>
+                    <button key={s} onClick={() => onService(s)}
+                      className="card-shadow group flex min-h-32 flex-col items-start justify-between rounded-[1.75rem] p-4 text-left transition-transform active:scale-[.98]"
+                      style={{ background: tintOf(s).tint }}>
+                      <div className="flex w-full items-start justify-between">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/70" style={{ color: tintOf(s).dot }}>{m.icon}</div>
+                        {/* The circular chevron the reference ends every row with — here it marks the tile as a way in. */}
+                        <span aria-hidden className="chev opacity-60 transition-opacity group-hover:opacity-100">
+                          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+                        </span>
+                      </div>
+                      <div className="mt-3">
+                        <p className="font-display text-base font-extrabold leading-tight" style={{ color: tintOf(s).ink }}>{m.label}</p>
+                        <p className="mt-0.5 text-xs font-medium" style={{ color: tintOf(s).ink, opacity: .72 }}>
+                          {sum ? (sum.count
+                            ? <>{sum.count} nearby · <span className="whitespace-nowrap">₹{sum.minRate}–₹{sum.maxRate}</span></>
+                            : "None nearby yet") : "…"}
+                        </p>
+                      </div>
                     </button>
                   );
                 })}
@@ -420,15 +463,22 @@ function Home({ initial, config, onService, onOpenRequest, onProfile, onSignOut 
           <section className="flex flex-col gap-3">
             {isProvider ? (
               <>
+                {/* A state, not an alarm: a soft card with a small live dot, so "available" does not shout louder
+                    than the primary action anywhere else on the screen. */}
                 <button onClick={toggleAvailable} aria-pressed={me.onDuty}
-                  className={`flex min-h-14 items-center justify-between rounded-2xl px-4 text-left ${me.onDuty ? "bg-resq-green text-white" : "border-2 border-slate-200 bg-white text-resq-navy"}`}>
-                  <div><p className="font-display font-bold">{me.onDuty ? "Available for work" : "Not taking jobs"}</p>
-                    <p className={`text-xs ${me.onDuty ? "text-white/80" : "text-resq-slate"}`}>{me.onDuty ? "Nearby requests for your services reach you" : me.availabilityPausedAt ? `Paused at ${fmtTime(me.availabilityPausedAt)} after you booked medical help · tap when you're free` : "Tap to receive requests"}</p></div>
-                  <div className={`flex h-7 w-12 items-center rounded-full p-1 ${me.onDuty ? "justify-end bg-white/30" : "justify-start bg-slate-200"}`}><div className="h-5 w-5 rounded-full bg-white" /></div>
+                  className={`card-shadow flex min-h-16 items-center justify-between gap-3 rounded-[1.75rem] px-5 text-left transition-colors ${me.onDuty ? "bg-positive-soft" : "bg-surface"}`}>
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-2 font-display font-extrabold text-ink">
+                      {me.onDuty && <span aria-hidden className="h-2 w-2 rounded-full bg-positive" />}
+                      {me.onDuty ? "Available for work" : "Not taking jobs"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-mist">{me.onDuty ? "Nearby requests reach you" : me.availabilityPausedAt ? `Paused at ${fmtTime(me.availabilityPausedAt)} after you asked for help · tap when you're free` : "Tap to receive requests"}</p>
+                  </div>
+                  <div className={`flex h-7 w-12 flex-none items-center rounded-full p-1 transition-colors ${me.onDuty ? "justify-end bg-positive" : "justify-start bg-hairline"}`}><div className="h-5 w-5 rounded-full bg-white shadow-sm" /></div>
                 </button>
                 <BeaconChip paused={beacon.paused} ago={beacon.ago} source={beacon.source} onToggle={(p) => void beacon.setPaused(p)} />
                 <div className="mt-2 flex items-end justify-between">
-                  <div><h2 className="font-display text-lg font-bold text-resq-navy">Job requests for you</h2>
+                  <div><h2 className="font-display text-xl font-extrabold tracking-tight text-ink">Job requests for you</h2>
                     <p className="text-xs text-resq-slate">Within {dash.radiusKm} km for {me.skills.filter((s) => (SERVICES as readonly string[]).includes(s)).map((s) => SKILL_META[s].label).join(", ")}</p></div>
                   <Badge variant={dash.feed.length ? "emergency" : "default"}>{dash.feed.length}</Badge>
                 </div>
@@ -474,17 +524,20 @@ function JobCard({ f, onOpen }: { f: FeedItem; onOpen: () => void }) {
   const r = f.request;
   const m = r.service ? SKILL_META[r.service] : null;
   return (
-    <button onClick={onOpen} className="card-shadow animate-slide-up w-full rounded-2xl border-2 border-slate-100 bg-white p-4 text-left transition-colors hover:bg-slate-50">
+    <button onClick={onOpen}
+      className="card-shadow animate-slide-up w-full rounded-[1.75rem] p-4 text-left transition-transform active:scale-[.99]"
+      style={{ background: tintOf(r.service).tint }}>
       <div className="flex items-center gap-2">
-        {m && <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: m.bg, color: m.color }}>{m.icon}</span>}
-        <span className="font-display font-bold text-resq-navy">{m?.label ?? "Job"}</span>
-        <span className="ml-auto text-xs text-resq-slate">{fmtTime(r.createdAt)}</span>
+        {m && <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/70" style={{ color: tintOf(r.service).dot }}>{m.icon}</span>}
+        <span className="font-display font-extrabold" style={{ color: tintOf(r.service).ink }}>{m?.label ?? "Job"}</span>
+        <span className="ml-auto text-xs font-medium" style={{ color: tintOf(r.service).ink, opacity: .7 }}>{fmtTime(r.createdAt)}</span>
+        <span aria-hidden className="chev"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg></span>
       </div>
-      <p className="mt-1.5 text-sm text-resq-navy"><strong>{r.requesterName ?? "A neighbour"}</strong> · {fmtDistance(f.distanceKm)} away</p>
+      <p className="mt-2 text-sm text-ink"><strong className="font-bold">{r.requesterName ?? "A neighbour"}</strong> · {fmtDistance(f.distanceKm)} away</p>
       {f.aiMatch && <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-resq-green-light px-2 py-0.5 text-xs font-bold text-resq-green"><Icon.Check size={12} />Matched for you: you have the tools</p>}
       {r.scope && <p className="mt-1 text-sm font-semibold text-resq-navy">{r.scope.parsedTitle} · ~{r.scope.estimatedTimeMinutes} min</p>}
-      <p className="line-clamp-2 text-sm text-resq-slate">“{r.description}”</p>
-      <p className="mt-2 text-xs text-resq-slate">Your rate: <strong className="text-resq-navy">{fmtRate(f.myRate)}</strong>{r.scope?.requiredTools.length ? ` · you have ${f.toolsHave.length}/${r.scope.requiredTools.length} tools` : ""}{f.photoCount ? ` · ${f.photoCount} photo${f.photoCount > 1 ? "s" : ""} after you accept` : ""}</p>
+      <p className="line-clamp-2 text-sm text-ink/70">“{r.description}”</p>
+      <p className="mt-2 rounded-full bg-white/60 px-3 py-1.5 text-xs text-ink/75">Your rate: <strong className="font-bold text-ink">{fmtRate(f.myRate)}</strong>{r.scope?.requiredTools.length ? ` · you have ${f.toolsHave.length}/${r.scope.requiredTools.length} tools` : ""}{f.photoCount ? ` · ${f.photoCount} photo${f.photoCount > 1 ? "s" : ""} after you accept` : ""}</p>
     </button>
   );
 }
@@ -539,8 +592,9 @@ function JobSheet({ f, me, onClose, onAccept, onDecline }: { f: FeedItem; me: He
 }
 
 // On a job: only the customer's details; other requests wait in a locked tab until "Mark as done".
-function JobMode({ active, me, simulated, waiting, toast, onDismissToast, onDone }: {
-  active: NonNullable<Dashboard["active"]>; me: Helper; simulated: boolean; waiting: number; toast: string | null; onDismissToast: () => void; onDone: () => void;
+function JobMode({ active, me, lang, simulated, waiting, toast, onDismissToast, onDone }: {
+  active: NonNullable<Dashboard["active"]>; me: Helper; lang: LanguageCode; simulated: boolean; waiting: number; toast: string | null;
+  onDismissToast: () => void; onDone: (summary: DoneSummary) => void | Promise<void>;
 }) {
   const [tab, setTab] = useState<"job" | "others">("job");
   return (
@@ -553,7 +607,10 @@ function JobMode({ active, me, simulated, waiting, toast, onDismissToast, onDone
       </div>
       {toast && <div className="mb-4"><Toast text={toast} onClose={onDismissToast} /></div>}
       {tab === "job" ? (
-        <ActiveJob r={active.request} mapsUrl={active.mapsUrl} me={me.location} simulated={simulated} onDone={onDone} />
+        <>
+          <ActiveJob r={active.request} mapsUrl={active.mapsUrl} me={me.location} simulated={simulated} myRate={rateFor(me, active.request.service)} onDone={onDone} />
+          <VoiceNotes requestId={active.request.id} myLanguage={lang} className="mt-4" />
+        </>
       ) : (
         <section className="card-shadow rounded-2xl border border-slate-100 bg-white p-6 text-center">
           <Icon.Clock size={26} className="mx-auto text-resq-slate" />
@@ -577,7 +634,82 @@ function Describe({ service, me, center, onBack, onCreated }: { service: Service
   const [error, setError] = useState<string | null>(null);
   const [voiceErr, setVoiceErr] = useState<string | null>(null);
   const [analysing, setAnalysing] = useState(false);
-  const speech = useSpeech({ onText: setText, onFinal: setText, onError: (e) => setVoiceErr(speechErrorText(e)) });
+  // Everything downstream of this box — job scoping, which trade is picked, what providers read — works in
+  // English. So someone who speaks Malayalam is transcribed in Malayalam, then pivoted to English here, once.
+  const myLang = languageOf(me.language).code;
+  const [spoken, setSpoken] = useState<string | null>(null);   // their own words, kept on screen
+  const [translating, setTranslating] = useState(false);
+  const [translateNote, setTranslateNote] = useState<string | null>(null);
+
+  const pivotToEnglish = async (heard: string) => {
+    if (myLang === "en-IN") { setText(heard); return; }
+    setSpoken(heard);
+    setText(heard);
+    setTranslating(true);
+    setTranslateNote(null);
+    try {
+      const r = await api<{ text: string; source: string }>("/api/translate", { body: { text: heard, from: myLang, to: "en-IN" } });
+      if (r.ok && (r.data.source === "sarvam" || r.data.source === "ollama")) {
+        setText(r.data.text);
+        setTranslateNote("Translated to English for the provider. Check it and edit if it is wrong.");
+      } else {
+        setTranslateNote("Could not translate that — your own words were kept. Edit them or send as they are.");
+      }
+    } catch {
+      setTranslateNote("Could not translate that — your own words were kept.");
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  /**
+   * Tap to record, tap again to stop. The clip goes to Sarvam, which transcribes AND translates in one call, so
+   * nothing here depends on the browser being able to recognise Malayalam — which is what used to hang.
+   */
+  const [heardLang, setHeardLang] = useState<string | null>(null);
+  const sendClip = async (clip: Blob, secs: number) => {
+    setVoiceErr(null);
+    setSpoken(null);
+    setTranslateNote(null);
+    setTranslating(true);
+    try {
+      const fd = new FormData();
+      fd.append("audio", clip, `speech.${(clip.type.split("/")[1] ?? "webm").split(";")[0]}`);
+      const res = await fetch("/api/speech", { method: "POST", body: fd, headers: { "x-resq-session": getHelperToken() ?? "none" } });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        setVoiceErr(j.error === "speech_not_configured"
+          ? "Voice input is not set up on this server. Please type instead."
+          : "Could not understand that recording. Try again, or type it.");
+        return;
+      }
+      const data = (await res.json()) as { text: string; detected: string | null };
+      setText(data.text);
+      setHeardLang(data.detected);
+      setTranslateNote(`Heard ${secs}s of ${data.detected ? languageLabel(data.detected) : "speech"} and wrote it in English. Check it and edit if it is wrong.`);
+    } catch {
+      setVoiceErr("Could not send that recording. Try again, or type it.");
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const recorder = useRecorder({ onClip: (clip, secs) => { void sendClip(clip, secs); }, onError: (e) => setVoiceErr(recorderErrorText(e)) });
+
+  // Only used when the browser cannot record at all; Sarvam is the primary path.
+  const speech = useSpeech({
+    lang: myLang, fallbackLang: "en-IN", maxMs: 12_000,
+    onText: setText,
+    onFinal: (heard) => { void pivotToEnglish(heard); },
+    onError: (e) => setVoiceErr(speechErrorText(e)),
+  });
+  const micOn = recorder.supported ? recorder.recording : speech.listening;
+  const micSupported = recorder.supported || speech.supported;
+  const tapMic = () => {
+    setVoiceErr(null); setSpoken(null); setTranslateNote(null); setHeardLang(null);
+    if (recorder.supported) recorder.toggle(); else speech.toggle();
+  };
+
   useEffect(() => { void whereAmI(center).then(setLoc); }, [center]);
   useEffect(() => {
     if (!loc) return;
@@ -595,21 +727,58 @@ function Describe({ service, me, center, onBack, onCreated }: { service: Service
   return (
     <>
       <div className="bg-navy-gradient">
-        <Container><NavBar title={`Book a ${m.label.toLowerCase()}`} onBack={onBack} light /></Container>
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-5 pb-5">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl" style={{ background: m.bg, color: m.color }}>{m.icon}</div>
-          <p className="text-sm text-white/80">{providers === null ? "Checking who's nearby…" : providers.length ? `${providers.length} ${m.label.toLowerCase()}${providers.length > 1 ? "s" : ""} nearby${rates.length ? ` · usually ₹${Math.min(...rates.map((r) => r.min))}–₹${Math.max(...rates.map((r) => r.max))}` : ""}` : `No ${m.label.toLowerCase()} online nearby right now. You can still post; it stays open.`}</p>
+        <Container><NavBar title={`Book a ${m.label.toLowerCase()}`} onBack={onBack} /></Container>
+        {/* The reference opens a detail screen with a full-bleed colour panel carrying the category. Here the
+            panel is the trade's own tint, so the screen you land on is visibly the one you tapped. */}
+        <div className="mx-auto w-full max-w-3xl px-4 pb-5 md:px-8">
+          <div className="flex items-center gap-4 rounded-[1.75rem] p-5" style={{ background: tintOf(service).tint }}>
+            <div className="flex h-14 w-14 flex-none items-center justify-center rounded-2xl bg-white/70" style={{ color: tintOf(service).dot }}>{m.icon}</div>
+            <div className="min-w-0">
+              <p className="font-display text-xl font-extrabold leading-tight" style={{ color: tintOf(service).ink }}>{m.label}</p>
+              <p className="mt-0.5 text-sm" style={{ color: tintOf(service).ink, opacity: .78 }}>
+                {providers === null ? "Checking who's nearby…" : providers.length
+                  ? `${providers.length} nearby${rates.length ? ` · usually ₹${Math.min(...rates.map((r) => r.min))}–₹${Math.max(...rates.map((r) => r.max))}` : ""}`
+                  : "Nobody online nearby right now — your request stays open."}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
       <main className="mx-auto w-full max-w-3xl flex-1 px-5 py-5">
         <label htmlFor="what" className="mb-1.5 block font-display text-lg font-bold text-resq-navy">Describe the problem</label>
         <div className="flex items-start gap-3">
           <textarea id="what" value={text} onChange={(e) => setText(e.target.value)} maxLength={1000} rows={4} autoFocus
-            placeholder={service === "plumber" ? "e.g. Kitchen sink pipe is leaking and water is spreading on the floor" : service === "doctor" ? "e.g. Fever since yesterday, need a home visit" : "What needs to be done, and anything they should bring"}
+            placeholder={service === "plumber" ? "e.g. Kitchen sink pipe is leaking and water is spreading on the floor" : "What needs to be done, and anything they should bring"}
             className="card-shadow min-h-32 flex-1 rounded-2xl border border-slate-200 bg-white p-4 text-base text-resq-navy outline-none focus:ring-2 focus:ring-resq-red/30" />
-          {speech.supported && <VoiceMic listening={speech.listening} onToggle={() => { setVoiceErr(null); speech.toggle(); }} />}
+          {micSupported && <VoiceMic listening={micOn} onToggle={tapMic} disabled={translating} />}
         </div>
-        {speech.supported && <p className="mt-1 text-xs text-resq-slate">{speech.listening ? "Listening… speak now" : voiceErr ?? "Tap the mic to speak instead of typing."}</p>}
+        {micSupported && !micOn && !spoken && !translating && !heardLang && (
+          <p className="mt-2 text-xs text-resq-slate">
+            Tap the mic and speak in {languageOf(myLang).endonym} — ResQ writes it in English for the provider.
+            {recorder.supported && " Tap it again when you have finished."}
+          </p>
+        )}
+        {micOn && (
+          <p className="mt-2 flex items-center gap-2 text-xs font-semibold text-resq-red">
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-resq-red" />
+            Recording {recorder.recording ? `${recorder.seconds}s` : ""} — tap the mic again to stop
+            {recorder.recording && recorder.seconds >= MAX_RECORD_SECONDS - 10 ? ` (stops at ${MAX_RECORD_SECONDS}s)` : ""}
+          </p>
+        )}
+        {translating && (
+          <p className="mt-2 flex items-center gap-2 text-xs text-resq-navy"><span className="h-3 w-3 animate-spin rounded-full border-2 border-resq-cyan border-t-transparent" />Writing down what you said…</p>
+        )}
+        {heardLang && translateNote && !translating && (
+          <p className="mt-2 rounded-xl bg-slate-50 p-2.5 text-xs text-resq-slate">{translateNote}</p>
+        )}
+        {spoken && !translating && (
+          <div className="mt-2 rounded-xl bg-slate-50 p-3">
+            <p className="text-xs text-resq-slate">You said, in {languageOf(myLang).endonym}:</p>
+            <p className="mt-0.5 text-sm text-resq-navy">{spoken}</p>
+            {translateNote && <p className="mt-1.5 text-xs text-resq-slate">{translateNote}</p>}
+          </div>
+        )}
+        {voiceErr && <p className="mt-2 rounded-2xl bg-alert-soft p-2.5 text-xs font-medium text-alert">{voiceErr}</p>}
 
         {providers && providers.length > 0 && (
           <section className="mt-5">
@@ -617,7 +786,7 @@ function Describe({ service, me, center, onBack, onCreated }: { service: Service
             <ul className="space-y-2">
               {providers.slice(0, 5).map((p) => (
                 <li key={p.id} className="card-shadow flex items-center gap-3 rounded-xl bg-white p-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl text-sm font-bold text-white" style={{ background: m.color }}>{initials(p.name)}</div>
+                  <div className="flex h-11 w-11 flex-none items-center justify-center rounded-2xl text-sm font-extrabold" style={{ background: tintOf(service).tint, color: tintOf(service).ink }}>{initials(p.name)}</div>
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-resq-navy">{p.name}<Stars rating={p.rating} /><VerifiedBadge verified={p.verified} /></p>
                     <p className="text-xs text-resq-slate">{fmtDistance(p.distanceKm)} away · {fmtRate(p.rate)}</p>
@@ -628,7 +797,6 @@ function Describe({ service, me, center, onBack, onCreated }: { service: Service
           </section>
         )}
         <p className="mt-4 flex items-center gap-1 text-xs text-resq-slate"><Icon.MapPin size={12} />{loc ? (loc.source === "gps" ? "Using your GPS location" : "Demo location near TKMCE (this device's GPS isn't in the demo area)") : "Getting your location…"}. Shared only with the provider who accepts.</p>
-        {MEDICAL_SERVICES.includes(service) && <p className="mt-2 rounded-xl bg-resq-red-light p-3 text-xs text-resq-red-dark">For a medical emergency, don&apos;t wait: <a href="tel:112" className="font-bold underline">call 112</a>.</p>}
         {error && <p role="alert" className="mt-3 rounded-xl bg-resq-red-light p-3 text-sm font-medium text-resq-red">{error}</p>}
         <button onClick={() => setAnalysing(true)} disabled={busy || text.trim().length < 5}
           className={`mt-4 flex min-h-16 w-full items-center justify-center gap-2 rounded-2xl font-display text-xl font-bold ${text.trim().length >= 5 ? "bg-resq-red text-white shadow-lg" : "cursor-not-allowed bg-slate-200 text-slate-400"}`}>

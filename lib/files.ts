@@ -79,3 +79,37 @@ export async function readJobPhoto(fileId: string): Promise<Buffer | null> {
     return null;
   }
 }
+
+// ─── Purchase receipts (photographed by the worker mid-job; read by the AI, approved by the customer) ──────────
+// Same shape and same bucket-prefixed ids as job photos, in their own GridFS bucket: a receipt is evidence behind a
+// money claim, so it is kept apart from the customer's job photos and never served from the job-photo route.
+export const RECEIPT_MAX_BYTES = 6 * 1024 * 1024;
+export const RECEIPT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic"] as const;
+
+export async function saveReceipt(bytes: Buffer, meta: { requestId: string; workerId: string; mime: string }): Promise<string> {
+  const { GridFSBucket } = await import("mongodb");
+  const bucket = new GridFSBucket(await getDb(), { bucketName: "receipts" });
+  const id = randomUUID();
+  await new Promise<void>((resolve, reject) => {
+    const up = bucket.openUploadStreamWithId(id as never, `receipt-${meta.requestId}`, { metadata: { requestId: meta.requestId, workerId: meta.workerId, mime: meta.mime, uploadedAt: new Date().toISOString() } });
+    up.on("finish", () => resolve()).on("error", reject);
+    up.end(bytes);
+  });
+  return `receipts:${id}`;
+}
+
+export async function readReceipt(fileId: string): Promise<Buffer | null> {
+  try {
+    const [bucketName, id] = fileId.split(":");
+    if (bucketName !== "receipts" || !id || !/^[0-9a-f-]{36}$/.test(id)) return null;
+    const { GridFSBucket } = await import("mongodb");
+    const bucket = new GridFSBucket(await getDb(), { bucketName });
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      bucket.openDownloadStream(id as never).on("data", (c: Buffer) => chunks.push(c)).on("end", () => resolve()).on("error", reject);
+    });
+    return Buffer.concat(chunks);
+  } catch {
+    return null;
+  }
+}

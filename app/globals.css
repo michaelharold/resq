@@ -1,26 +1,71 @@
 @import "tailwindcss";
 
-/* ResQ design tokens (from the Figma Make design) */
+/*
+ * ResQ visual language.
+ *
+ * Warm bone canvas, one saturated accent, and a pastel per trade. The tints are the load-bearing idea: a plumber
+ * job is always sky, an electrician always butter, so someone scanning a busy feed finds their trade by colour
+ * before they read a word. That is wayfinding, not decoration, which is why there are exactly as many tints as
+ * there are bookable services and no spare ones lying around for ornament.
+ *
+ * Violet appears ONLY on the primary action of a screen. If two things on screen are violet, one of them is wrong.
+ */
 @theme {
-  --color-resq-red: #DC2626;
-  --color-resq-red-light: #FEF2F2;
-  --color-resq-red-dark: #991B1B;
-  --color-resq-navy: #1E3A5F;
-  --color-resq-navy-dark: #0F1F33;
-  --color-resq-green: #16A34A;
-  --color-resq-green-light: #F0FDF4;
-  --color-resq-cyan: #0EA5E9;
-  --color-resq-cyan-light: #F0F9FF;
-  --color-resq-amber: #D97706;
-  --color-resq-slate: #64748B;
-  --font-sans: var(--font-inter), system-ui, sans-serif;
-  --font-display: var(--font-dm-sans), system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+  /* Surfaces and ink */
+  --color-bone: #F4F1EB;          /* app canvas — warm, never pure white */
+  --color-surface: #FFFFFF;
+  --color-ink: #15141B;           /* headings, and the near-black pills */
+  --color-mist: #6E6A79;          /* secondary text */
+  --color-hairline: #E6E1D8;
+
+  /* The one accent */
+  --color-violet: #6D4DE6;
+  --color-violet-deep: #5638D4;
+  --color-violet-soft: #EDE9FD;
+
+  /* Status — kept muted so they never compete with the accent */
+  --color-positive: #2E9E5B;
+  --color-positive-soft: #E3F5EA;
+  --color-warn: #C2763A;
+  --color-warn-soft: #FBEEE2;
+  --color-alert: #D6453F;
+  --color-alert-soft: #FCEBEA;
+
+  /* One tint per bookable trade (lib/theme.ts maps service -> name) */
+  --color-tint-sky: #CFE4F8;
+  --color-tint-butter: #F8F0C2;
+  --color-tint-peach: #FBDDC3;
+  --color-tint-mint: #D8EDC6;
+  --color-tint-lilac: #DFD7F7;
+  --color-tint-pink: #FAD1E6;
+  --color-tint-sage: #D7E9DE;
+  --color-tint-coral: #FBD4CC;
+
+  /* Legacy names still referenced across the app, remapped onto the new palette so every screen
+     picks up the language at once rather than half the product looking like the old one. */
+  --color-resq-red: #6D4DE6;
+  --color-resq-red-light: #EDE9FD;
+  --color-resq-red-dark: #5638D4;
+  --color-resq-navy: #15141B;
+  --color-resq-navy-dark: #000000;
+  --color-resq-green: #2E9E5B;
+  --color-resq-green-light: #E3F5EA;
+  --color-resq-cyan: #6D4DE6;
+  --color-resq-cyan-light: #EDE9FD;
+  --color-resq-amber: #C2763A;
+  --color-resq-slate: #6E6A79;
+
+  --font-sans: var(--font-jakarta), system-ui, sans-serif;
+  --font-display: var(--font-jakarta), system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, monospace;
+
+  --radius-card: 1.75rem;         /* 28px — the reference's card corner */
+  --radius-tile: 1.25rem;
 }
 
 html, body {
-  background: #F1F5F9;
-  color: #1E3A5F;
+  background: #F4F1EB;
+  color: #15141B;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
 }
@@ -41,13 +86,30 @@ html, body {
 .typing-dot-3 { animation: typing-dot 1.2s ease-in-out .4s infinite; }
 .marker-pulse { animation: marker-pulse 1.6s ease-out infinite; }
 
-.card-shadow { box-shadow: 0 1px 3px rgba(30,58,95,.08), 0 4px 16px rgba(30,58,95,.06); }
-.card-shadow-lg { box-shadow: 0 4px 24px rgba(30,58,95,.12), 0 1px 4px rgba(30,58,95,.08); }
-.bg-emergency-gradient { background: linear-gradient(135deg, #DC2626 0%, #991B1B 100%); }
-.bg-navy-gradient { background: linear-gradient(160deg, #1E3A5F 0%, #0F1F33 100%); }
-.bg-success-gradient { background: linear-gradient(135deg, #16A34A 0%, #15803D 100%); }
-.bg-ai-gradient { background: linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%); }
-.timeline-line { position: absolute; left: 11px; width: 2px; background: linear-gradient(to bottom, #DC2626, #16A34A); }
+/*
+ * Shadows are warm and diffuse, lit from above, and deliberately soft: on a bone canvas a cool grey shadow
+ * (rgba(0,0,0,.1)) reads as dirt. Two levels only — a card sits, or a card floats. Anything needing a third
+ * level is really asking for a different layout.
+ */
+.card-shadow { box-shadow: 0 1px 2px rgba(60,48,30,.05), 0 6px 20px rgba(60,48,30,.06); }
+.card-shadow-lg { box-shadow: 0 2px 6px rgba(60,48,30,.07), 0 18px 44px rgba(60,48,30,.10); }
+
+/* The header is a bone wash, not a slab of navy: the canvas continues under the content rather than fighting it. */
+.bg-navy-gradient { background: linear-gradient(170deg, #FBF9F5 0%, #F1EDE4 100%); color: #15141B; }
+.bg-emergency-gradient { background: linear-gradient(135deg, #6D4DE6 0%, #5638D4 100%); }
+.bg-success-gradient { background: linear-gradient(135deg, #2E9E5B 0%, #257F49 100%); }
+.bg-ai-gradient { background: linear-gradient(135deg, #6D4DE6 0%, #8B6BF0 100%); }
+
+/* The reference's floating dock. Sits above the safe area on a phone; becomes a normal bar from lg. */
+.dock { box-shadow: 0 6px 28px rgba(60,48,30,.16); }
+
+/* The circular chevron that ends every list row in the reference. */
+.chev { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem;
+        border-radius: 9999px; background: rgba(255,255,255,.7); color: #15141B; flex: none; }
+
+/* Headline treatment: the reference sets the second line in italic. One device, used once per screen. */
+.display-italic { font-style: italic; letter-spacing: -.02em; }
+.timeline-line { position: absolute; left: 11px; width: 2px; background: linear-gradient(to bottom, #6D4DE6, #2E9E5B); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

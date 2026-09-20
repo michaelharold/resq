@@ -4,7 +4,7 @@
  * than a real demo phone (reliability 0.5–0.65, lastSeen −15 min, never every flood/evacuation skill, none
  * within 150 m) so demo phones registered at the venue land in wave 1's top 3.
  */
-import type { Helper, LatLng, Skill, TrustTier, UserLocation } from "../lib/types";
+import type { Helper, LanguageCode, LatLng, Skill, TrustTier, UserLocation } from "../lib/types";
 
 const NAMES = ["Anjali Nair", "Faizal Rahman", "Reshma Pillai", "Sreekumar V", "Fathima Beevi", "Vishnu Prasad",
   "Divya Menon", "Joseph Thomas", "Nimmy George", "Rahul Krishnan", "Athira S", "Shaji Mathew", "Lekshmi Devi",
@@ -15,12 +15,15 @@ const NAMES = ["Anjali Nair", "Faizal Rahman", "Reshma Pillai", "Sreekumar V", "
 // 30 skill sets: every skill ≥ 2×, doctor/nurse/swimmer/boat_owner ≥ 3×, nobody holds all of
 // {boat_owner, swimmer, driver_4x4} or all of {swimmer, boat_owner, first_aid}.
 // 30 demo providers for the community-services app: every service is offered by 2–4 people nearby.
+// Trades only, and deliberately even: 5 providers per service across the 8 bookable trades, so no service on
+// the home screen ever reads "1 nearby" in a demo. The medical skillsets that used to sit at 9, 10, 11, 18, 19,
+// 25, 26 and 30 were reassigned when doctor/nurse/caregiver stopped being bookable (see lib/taxonomy.ts).
 const SKILLSETS: Skill[][] = [
   ["plumber"], ["electrician"], ["carpenter"], ["ac_technician"], ["appliance_repair"], ["painter"], ["cleaner"], ["mechanic"],
-  ["doctor"], ["nurse"], ["caregiver"], ["plumber", "electrician"], ["electrician", "appliance_repair"], ["ac_technician", "appliance_repair"],
-  ["carpenter", "painter"], ["cleaner"], ["mechanic"], ["doctor"], ["nurse", "caregiver"], ["plumber"],
-  ["electrician"], ["carpenter"], ["painter", "cleaner"], ["ac_technician"], ["caregiver"], ["nurse"],
-  ["plumber", "carpenter"], ["appliance_repair"], ["mechanic", "electrician"], ["doctor", "nurse"],
+  ["cleaner"], ["painter"], ["mechanic"], ["plumber", "electrician"], ["electrician", "appliance_repair"], ["ac_technician", "appliance_repair"],
+  ["carpenter", "painter"], ["cleaner"], ["mechanic"], ["ac_technician"], ["cleaner", "painter"], ["plumber"],
+  ["electrician"], ["carpenter"], ["painter", "cleaner"], ["ac_technician"], ["appliance_repair"], ["mechanic", "ac_technician"],
+  ["plumber", "carpenter"], ["appliance_repair"], ["mechanic", "electrician"], ["plumber", "carpenter"],
 ];
 /** Typical local rates (₹) per service: [min, max]. Each provider gets a slightly different range. */
 const RATES: Partial<Record<Skill, [number, number]>> = {
@@ -42,6 +45,15 @@ const KITS: Partial<Record<Skill, string[]>> = {
   caregiver: ["thermometer", "bp_monitor", "first_aid_kit"],
 };
 /** Every third provider is missing one tool, so tool matching has something to discriminate on in the demo. */
+/**
+ * Languages across the 30 providers. Most of Kollam reads Malayalam, so the mix is weighted that way — but every
+ * service has at least one provider who does NOT, which is the whole point: a demo where everyone shares a
+ * language proves nothing. Deterministic by index so a rehearsed demo behaves the same way twice.
+ */
+const SEED_LANGUAGES: LanguageCode[] = ["ml-IN", "ml-IN", "ta-IN", "ml-IN", "hi-IN", "ml-IN", "ta-IN", "ml-IN",
+  "en-IN", "ml-IN", "te-IN", "ml-IN", "ta-IN", "hi-IN", "ml-IN", "kn-IN", "ml-IN", "en-IN", "ml-IN", "ta-IN",
+  "ml-IN", "hi-IN", "ta-IN", "te-IN", "ml-IN", "hi-IN", "ta-IN", "ml-IN", "kn-IN", "ml-IN"];
+
 function seedTools(skills: Skill[], i: number): Helper["toolsOnHand"] {
   const all = [...new Set(skills.flatMap((s) => KITS[s] ?? []))];
   return (i % 3 === 2 ? all.slice(1) : all) as Helper["toolsOnHand"];
@@ -95,6 +107,7 @@ export function seedHelpers(center: LatLng, now: Date): Helper[] {
       name,
       phone: `+9190000000${String(i + 1).padStart(2, "0")}`,
       skills: SKILLSETS[i],
+      language: SEED_LANGUAGES[i],
       rates: seedRates(SKILLSETS[i], i),
       toolsOnHand: seedTools(SKILLSETS[i], i),
       location: { lat: +(center.lat + dLat).toFixed(6), lng: +(center.lng + dLng).toFixed(6) },

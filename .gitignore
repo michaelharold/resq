@@ -21,3 +21,4 @@ npm-debug.log*
 
 # local account storage (no database purchased)
 .data/
+.test-dist-*

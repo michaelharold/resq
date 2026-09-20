@@ -1,15 +1,24 @@
 /**
  * Persistence boundary (README §9). Everything goes through getStore(); only MemoryStore exists because no data
  * layer was purchased (Firebase bid lost). Additions to the README interface: getHelperByPhone (OTP + inbound SMS),
- * listHelpers (ops map), getDispatch (respond), saveRating (§3 "gets rated").
+ * listHelpers (ops map), getDispatch (respond), saveRating (§3 "gets rated"), and the money records
+ * (payments, reimbursements) that Razorpay settlement and receipt approval are written into.
  */
-import type { AuditEntry, Authority, Dispatch, Helper, HelpRequest, LatLng, Otp, Rating, StoreErrorReason, UserLocation, Zone } from "../types";
+import type { AuditEntry, Authority, Dispatch, Helper, HelpRequest, LatLng, Otp, Payment, Rating, Reimbursement, StoreErrorReason, UserLocation, Zone } from "../types";
 import { MemoryStore } from "./memory";
 import { JsonFilePersistence, MongoPersistence } from "./persist";
 
 export type AcceptResult =
   | { ok: true; request: HelpRequest; dispatch: Dispatch; cancelled: Dispatch[] }
   | { ok: false; reason: StoreErrorReason };
+
+/**
+ * What markPaymentPaid answers. `alreadyPaid` is the half that matters: Razorpay announces one payment twice (the
+ * browser callback and the webhook, in either order), so the caller credits the worker only when it is false.
+ */
+export type MarkPaidResult =
+  | { ok: true; payment: Payment; alreadyPaid: boolean }
+  | { ok: false; reason: "not_found" };
 
 export interface Store {
   upsertHelper(h: Helper): Promise<Helper>;
@@ -31,6 +40,19 @@ export interface Store {
   saveRating(r: Rating): Promise<Rating>;
   saveOtp(o: Otp): Promise<void>;
   verifyOtp(phone: string, code: string): Promise<boolean>;
+
+  // Money (lib/money.ts + Razorpay). Append-only: a record is superseded by a new one, never deleted.
+  createPayment(p: Payment): Promise<Payment>;
+  getPayment(id: string): Promise<Payment | null>;
+  getPaymentByOrderId(orderId: string): Promise<Payment | null>;      // the webhook knows the order, not our id
+  listPaymentsForRequest(requestId: string): Promise<Payment[]>;      // oldest attempt first
+  updatePayment(id: string, patch: Partial<Payment>): Promise<Payment | null>;
+  /** The one way a payment reaches "paid". Safe to call twice for the same payment; credits the worker once. */
+  markPaymentPaid(id: string, paymentId: string): Promise<MarkPaidResult>;
+  createReimbursement(r: Reimbursement): Promise<Reimbursement>;
+  getReimbursement(id: string): Promise<Reimbursement | null>;
+  listReimbursements(requestId: string): Promise<Reimbursement[]>;    // oldest first
+  updateReimbursement(id: string, patch: Partial<Reimbursement>): Promise<Reimbursement | null>;
 
   // Disaster response (authorities)
   recordLocation(u: Omit<UserLocation, "history">): Promise<UserLocation>;   // upsert by phone, appends to the 24 h trail

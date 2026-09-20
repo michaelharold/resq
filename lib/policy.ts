@@ -45,6 +45,8 @@ export function isTrustTier(x: unknown): x is TrustTier {
 }
 export const tierOf = (h: Pick<Helper, "trustTier"> | null | undefined): TrustTier => h?.trustTier ?? "TIER_1_NEIGHBOR";
 export const walletOf = (h: Pick<Helper, "walletBalance"> | null | undefined): number => h?.walletBalance ?? 0;
+/** Service-job earnings, in PAISE. Separate from walletOf() above, which is the rupee-denominated escrow wallet. */
+export const walletPaiseOf = (h: Pick<Helper, "walletPaise"> | null | undefined): number => h?.walletPaise ?? 0;
 /** Paid household jobs may only be accepted by Certified Pros; free life-safety requests by anyone. */
 export const REQUIRED_TIER_FOR_GIG: TrustTier = "TIER_2_CERTIFIED_PRO";
 /** Skills that can take a service request: the service itself plus any extra trades the AI tagged. */

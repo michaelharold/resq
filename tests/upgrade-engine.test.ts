@@ -406,7 +406,7 @@ test("validators: pricingOf and trustOf", () => {
   assert.deepEqual(trustOf({ trustTier: T1, credentialId: "" }, { trustTier: T2, credentialId: "PL-778" }), { ok: true, value: { trustTier: T1, credentialId: null } });
 });
 
-test("seed: doctor/nurse → Tier 3, electrician/plumber/generator owner → Tier 2, others Tier 1; SEED-xx only for Tier 2/3", () => {
+test("seed: electrician/plumber → Tier 2, other trades Tier 1; SEED-xx only for Tier 2/3, and no Tier 3 (no medical seeds)", () => {
   const helpers = seedHelpers(C, new Date());
   assert.equal(helpers.length, 30);
   for (const s of helpers) {
@@ -417,5 +417,10 @@ test("seed: doctor/nurse → Tier 3, electrician/plumber/generator owner → Tie
     else assert.equal(s.credentialId, `SEED-${s.id.slice(-2)}`);
     assert.equal(s.walletBalance, undefined);
   }
-  assert.ok(helpers.some((s) => s.trustTier === T1) && helpers.some((s) => s.trustTier === T2) && helpers.some((s) => s.trustTier === T3));
+  assert.ok(helpers.some((s) => s.trustTier === T1), "some seeded providers are plain neighbours");
+  assert.ok(helpers.some((s) => s.trustTier === T2), "electricians and plumbers are certified pros");
+  // seedTier() still awards Tier 3 for doctor/nurse, but no seeded provider holds those skills any more: they
+  // stopped being bookable services (lib/taxonomy.ts) and the seed is trades-only. The rule is kept rather than
+  // deleted because the emergency triage tables still map need types onto doctor/nurse.
+  assert.equal(helpers.filter((s) => s.trustTier === T3).length, 0, "a trades-only seed has no first responders");
 });

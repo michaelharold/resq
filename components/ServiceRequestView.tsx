@@ -1,30 +1,50 @@
 "use client";
-/* The requester's live view of a service request: finding a provider → matched (details, map, call, message) → done (pay, rate). */
+/*
+ * The requester's live view of a service request: finding a provider → matched (details, map, call, message) →
+ * done (bill, pay, rate).
+ *
+ * The money is deliberately not an afterthought bolted to the end. A receipt the provider files mid-job appears on
+ * this screen the moment they file it, while they are still standing in the room, because approving a ₹450 tap is
+ * a conversation the two of them can have face to face — and because a claim first seen on the final bill is a
+ * claim the customer has no way to check. PaymentPanel owns all of it: the review cards, the itemised bill, the
+ * Razorpay checkout and the receipt afterwards. This file only decides where on the page it sits.
+ */
 import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 import { Badge, ETABadge, NavBar, PulsingDot, initials } from "./ui";
 import { SKILL_META } from "./skills";
 import { LiveMap, type MapMarker } from "./LiveMap";
 import { JobBrief } from "./JobBrief";
+import { PaymentPanel } from "./PaymentPanel";
+import { VoiceNotes } from "./VoiceNotes";
+import { languageOf, type LanguageCode } from "@/lib/languages";
 import { api, etaMinutes, fmtDistance, fmtTime, getHelperToken, getUid } from "@/lib/client/api";
 import { useSnapshot } from "@/lib/client/sse";
-import { MEDICAL_SERVICES, type Service } from "@/lib/taxonomy";
 import type { RateRange, RequestView, Skill } from "@/lib/types";
 
 export type ProviderPreview = { id: string; name: string; verified: boolean; rating: number; rate: RateRange | null; distanceKm: number };
 export const fmtRate = (r: RateRange | null | undefined) => (r ? `₹${r.min.toLocaleString("en-IN")}–₹${r.max.toLocaleString("en-IN")}` : "Rate on request");
 
 export function VerifiedBadge({ verified, pending = false }: { verified: boolean; pending?: boolean }) {
-  if (verified) return <span className="inline-flex items-center gap-1 rounded-full bg-resq-cyan-light px-2 py-0.5 text-xs font-semibold text-resq-cyan"><Icon.Shield size={12} />ID verified</span>;
-  if (pending) return <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700"><Icon.Clock size={12} />ID under review</span>;
-  return <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-resq-slate">Not verified</span>;
+  if (verified) return <span className="inline-flex items-center gap-1 rounded-full bg-positive-soft px-2.5 py-1 text-xs font-bold text-positive"><Icon.Shield size={12} />ID verified</span>;
+  if (pending) return <span className="inline-flex items-center gap-1 rounded-full bg-warn-soft px-2.5 py-1 text-xs font-bold text-warn"><Icon.Clock size={12} />ID under review</span>;
+  return <span className="inline-flex items-center gap-1 rounded-full bg-bone px-2.5 py-1 text-xs font-medium text-mist">Not verified</span>;
 }
 
 export function Stars({ rating }: { rating: number }) {
-  return <span className="inline-flex items-center gap-0.5 rounded-lg bg-amber-50 px-1.5 py-0.5 text-xs font-bold text-amber-700"><Icon.Star size={11} className="text-amber-400" />{rating.toFixed(1)}</span>;
+  return <span className="inline-flex items-center gap-0.5 rounded-full bg-warn-soft px-2 py-1 text-xs font-bold text-warn"><Icon.Star size={11} />{rating.toFixed(1)}</span>;
 }
 
 export function ServiceRequestView({ id, onClose }: { id: string; onClose: () => void }) {
+  const [myLang, setMyLang] = useState<LanguageCode>(languageOf(null).code);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/me/language", { headers: { "x-resq-session": getHelperToken() ?? "none" } });
+        if (res.ok) setMyLang(((await res.json()) as { language: LanguageCode }).language);
+      } catch { /* the default language is a fine fallback */ }
+    })();
+  }, []);
   const uid = typeof window === "undefined" ? "" : getUid();
   const tok = typeof window === "undefined" ? "none" : getHelperToken() ?? "none";
   const { data: view, connected, setData } = useSnapshot<RequestView>(
@@ -50,7 +70,6 @@ export function ServiceRequestView({ id, onClose }: { id: string; onClose: () =>
   if (!view || !r || !service) return <div className="flex flex-1 items-center justify-center text-resq-slate">Loading…</div>;
   const meta = SKILL_META[service];
   const h = view.matchedHelper;
-  const medical = MEDICAL_SERVICES.includes(service as Service);
   const header = {
     searching: { title: `Finding a ${meta.label.toLowerCase()}`, sub: "Nearby providers have your request. The first to accept gets the job.", bg: "bg-navy-gradient" },
     matched: { title: `${h?.name ?? "Your provider"} is on the way`, sub: `${meta.label} · accepted at ${fmtTime(r.updatedAt)}`, bg: "bg-success-gradient" },
@@ -138,12 +157,13 @@ export function ServiceRequestView({ id, onClose }: { id: string; onClose: () =>
             </section>
           )}
 
+          {h && r.status === "matched" && <VoiceNotes requestId={id} myLanguage={myLang} />}
+
+          <PaymentPanel requestId={id} workerName={h?.name ?? "your provider"} status={r.status} />
+
           {r.status === "resolved" && (
             <section className="card-shadow rounded-2xl border border-slate-100 bg-white p-5">
-              <h3 className="font-display font-semibold text-resq-navy">Pay {h?.name ?? "your provider"}</h3>
-              <p className="mt-1 text-sm text-resq-slate">Agreed range {fmtRate(h?.rate)}. In-app payment is coming soon; for now please pay the provider directly.</p>
-              <button disabled className="mt-3 min-h-14 w-full cursor-not-allowed rounded-2xl bg-slate-200 font-display text-lg font-bold text-slate-500">Pay in app · coming soon</button>
-              <p className="mt-4 text-center font-display font-semibold text-resq-navy">{stars ? "Thanks for rating" : "How was the service?"}</p>
+              <p className="text-center font-display font-semibold text-resq-navy">{stars ? "Thanks for rating" : `How was ${h?.name ?? "the service"}?`}</p>
               <div className="mt-2 flex justify-center gap-1">
                 {[1, 2, 3, 4, 5].map((n) => (
                   <button key={n} aria-label={`${n} stars`} disabled={stars > 0} onClick={() => { setStars(n); void patch({ action: "rate", stars: n }); }}
@@ -160,7 +180,6 @@ export function ServiceRequestView({ id, onClose }: { id: string; onClose: () =>
           {(r.status === "resolved" || r.status === "cancelled") && (
             <button onClick={onClose} className="min-h-12 w-full rounded-2xl bg-resq-navy font-semibold text-white">Back to home</button>
           )}
-          {medical && <p className="rounded-xl bg-resq-red-light p-3 text-xs text-resq-red-dark">For a medical emergency, don&apos;t wait: <a href="tel:112" className="font-bold underline">call 112</a>.</p>}
         </div>
 
         {r.location && (r.status === "matched" || r.status === "searching") && (

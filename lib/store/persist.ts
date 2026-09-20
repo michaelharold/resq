@@ -2,17 +2,23 @@
  * Durable storage for registered-user data. Live dispatch state (requests, dispatches, OTPs) stays in memory so
  * accept-once stays atomic; everything a person registers is persisted through one of these backends:
  *   - MongoPersistence (MONGODB_URI set): database `resq` (MONGODB_DB), collections users, authorities,
- *     user_locations, zones, audit_log — write-through of changed documents.
+ *     user_locations, zones, audit_log, payments, reimbursements — write-through of changed documents.
  *   - JsonFilePersistence (fallback): .data/accounts.json.
+ *
+ * Payments and reimbursements are durable even though the requests they belong to are not: a record of money that
+ * changed hands is worthless if a restart can erase it, and a settled payment is the only evidence the worker was
+ * credited. Nothing here ever deletes one either — a wrong payment is corrected by writing another record.
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { AuditEntry, Authority, Helper, UserLocation, Zone } from "../types";
+import type { AuditEntry, Authority, Helper, Payment, Reimbursement, UserLocation, Zone } from "../types";
 import { getDb } from "../mongo";
 
-export type Snapshot = { helpers: Helper[]; locations: UserLocation[]; zones: Zone[]; authorities: Authority[]; audit: AuditEntry[] };
+export type Snapshot = { helpers: Helper[]; locations: UserLocation[]; zones: Zone[]; authorities: Authority[]; audit: AuditEntry[];
+  payments: Payment[]; reimbursements: Reimbursement[] };
 export type Changes = {
   helpers: Helper[]; locations: UserLocation[]; deletedLocations: string[]; zones: Zone[]; authorities: Authority[]; audit: AuditEntry[];
+  payments: Payment[]; reimbursements: Reimbursement[];
   full: Snapshot; // for backends that rewrite everything
 };
 export interface Persistence {
@@ -55,6 +61,9 @@ export class MongoPersistence implements Persistence {
       db.collection("user_locations").createIndex({ geo: "2dsphere" }, { name: "locations_geo" }),
       db.collection("user_locations").createIndex({ updatedAt: -1 }, { name: "locations_recent" }),
       db.collection("audit_log").createIndex({ at: -1 }, { name: "audit_recent" }),
+      db.collection("payments").createIndex({ requestId: 1 }, { name: "payments_request" }),
+      db.collection("payments").createIndex({ orderId: 1 }, { name: "payments_order" }),   // the webhook only knows the order id
+      db.collection("reimbursements").createIndex({ requestId: 1 }, { name: "reimbursements_request" }),
     ]).then(() => undefined);
     await this.indexed;
     return db;
@@ -68,16 +77,19 @@ export class MongoPersistence implements Persistence {
       const old = await new JsonFilePersistence(this.importFrom).load();
       if (old && (old.helpers?.length || old.authorities?.length)) {
         await this.flush({ helpers: old.helpers ?? [], locations: old.locations ?? [], deletedLocations: [], zones: old.zones ?? [],
-          authorities: old.authorities ?? [], audit: old.audit ?? [], full: { helpers: [], locations: [], zones: [], authorities: [], audit: [] } });
+          authorities: old.authorities ?? [], audit: old.audit ?? [], payments: old.payments ?? [], reimbursements: old.reimbursements ?? [],
+          full: { helpers: [], locations: [], zones: [], authorities: [], audit: [], payments: [], reimbursements: [] } });
         console.log(`[store] imported ${old.helpers?.length ?? 0} users from ${this.importFrom} into MongoDB`);
       }
     }
-    const [helpers, locations, zones, authorities, audit] = await Promise.all([
+    const [helpers, locations, zones, authorities, audit, payments, reimbursements] = await Promise.all([
       users.find().toArray(), db.collection<Doc>("user_locations").find().toArray(), db.collection<Doc>("zones").find().toArray(),
       db.collection<Doc>("authorities").find().toArray(), db.collection<Doc>("audit_log").find().sort({ at: -1 }).limit(500).toArray(),
+      db.collection<Doc>("payments").find().toArray(), db.collection<Doc>("reimbursements").find().toArray(),
     ]);
     return { helpers: helpers.map((d) => strip<Helper>(d)), locations: locations.map((d) => strip<UserLocation>(d)), zones: zones.map((d) => strip<Zone>(d)),
-      authorities: authorities.map((d) => strip<Authority>(d)), audit: audit.map((d) => strip<AuditEntry>(d)) };
+      authorities: authorities.map((d) => strip<Authority>(d)), audit: audit.map((d) => strip<AuditEntry>(d)),
+      payments: payments.map((d) => strip<Payment>(d)), reimbursements: reimbursements.map((d) => strip<Reimbursement>(d)) };
   }
 
   async flush(c: Changes) {
@@ -93,6 +105,8 @@ export class MongoPersistence implements Persistence {
     if (c.zones.length) jobs.push(db.collection<Doc>("zones").bulkWrite(up(c.zones, (z) => z.id, (z) => ({ geo: point(z.center) }))));
     if (c.authorities.length) jobs.push(db.collection<Doc>("authorities").bulkWrite(up(c.authorities, (a) => a.username)));
     if (c.audit.length) jobs.push(db.collection<Doc>("audit_log").bulkWrite(up(c.audit, (e) => `${e.at}|${e.user}|${e.action}|${e.detail}`)));
+    if (c.payments.length) jobs.push(db.collection<Doc>("payments").bulkWrite(up(c.payments, (p) => p.id)));
+    if (c.reimbursements.length) jobs.push(db.collection<Doc>("reimbursements").bulkWrite(up(c.reimbursements, (r) => r.id)));
     await Promise.all(jobs);
   }
 }

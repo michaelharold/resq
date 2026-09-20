@@ -59,7 +59,9 @@ Records written before the upgrade lack the new fields: **always read them throu
   → HTTP 403 `{ ok: false, reason: "tier_required", error: "tier_required", requiredTier: "TIER_2_CERTIFIED_PRO" }`.
 - The feed (`lib/feed.ts`) hides micro-gigs from users who cannot accept them.
 - `DispatchPublic.helperTier` and `HelperPublic.trustTier` are already populated by `lib/views.ts`. Badges: `<TrustBadge tier />`.
-- Seeded helpers: doctor/nurse → Tier 3; electrician/plumber/generator_owner → Tier 2; others Tier 1
+- Seeded helpers: electrician/plumber/generator_owner → Tier 2; others Tier 1. (The doctor/nurse → Tier 3
+  rule still exists in seedTier() but no seeded provider hits it: the seed is trades-only since
+  doctor/nurse/caregiver stopped being bookable services.)
   (`scripts/seed.ts` stays self-contained: `import type` only). `npm run seed` must push tiers to a running server.
 
 ## 4. Hands-free voice

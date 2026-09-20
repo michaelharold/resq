@@ -3,7 +3,7 @@ import { isLatLng, json, jsonError, pricingOf, readJson, safe, text } from "@/li
 import { normalizePhone } from "@/lib/sms";
 import { getStore } from "@/lib/store";
 import { createHelpRequest, createServiceRequest, onReject } from "@/lib/waves";
-import { MEDICAL_SERVICES, isService } from "@/lib/taxonomy";
+import { isService } from "@/lib/taxonomy";
 import { emit } from "@/lib/events";
 import { buildRequestView } from "@/lib/views";
 
@@ -36,11 +36,10 @@ export const POST = safe(async (req: Request) => {
   if (b.service !== undefined) {
     if (!isService(b.service)) return jsonError(400, "service_invalid");
     if (!account) return jsonError(401, "unauthenticated", { detail: "Sign in to request a service." });
-    // Asking a doctor/nurse/caregiver for yourself means you are not free to help others right now.
-    if (MEDICAL_SERVICES.includes(b.service) && account.onDuty) {
-      const paused = await getStore().upsertHelper({ ...account, onDuty: false, availabilityPausedAt: new Date().toISOString() });
-      emit("helper:updated", { helper: paused });
-    }
+    // NOTE: booking a service no longer pauses the requester's own availability. That rule existed because
+    // booking a doctor or nurse for yourself meant you were unwell and could not work; it does not follow for a
+    // trade. Someone who books a plumber for a leaking sink is perfectly able to take an electrical job an hour
+    // later, and switching their availability off would quietly cost them work.
     const svc = await createServiceRequest({ service: b.service, description, location, account });
     return json(await buildRequestView(svc.id), 201);
   }

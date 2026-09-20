@@ -22,7 +22,7 @@ const twilioClient = getTwilio;
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export async function sendCode(phone: string): Promise<
-  { ok: true; channel: OtpChannel; devCode?: string } | { ok: false; error: "sms_not_configured" | "sms_failed"; detail?: string }
+  { ok: true; channel: OtpChannel; devCode?: string; devReason?: string } | { ok: false; error: "sms_not_configured" | "sms_failed"; detail?: string }
 > {
   const sid = verifySid();
   if (sid && twilioCreds()) {
@@ -31,9 +31,12 @@ export async function sendCode(phone: string): Promise<
       localOtp.delete(phone);
       return { ok: true, channel: "verify" };
     } catch (e) {
-      console.error(`[otp] Twilio Verify send to ${phone} failed: ${errText(e)}`);
-      // Trial accounts can only text verified numbers: in demo mode fall back to an on-screen code.
-      if (showOtpOnScreen()) return localCode(phone);
+      const why = errText(e);
+      console.error(`[otp] Twilio Verify send to ${phone} failed: ${why}`);
+      // Trial accounts can only text verified numbers: in demo mode fall back to an on-screen code. The reason
+      // travels with it, because "offline demo mode" on its own reads as a broken app rather than an account
+      // setting someone can go and change in two minutes.
+      if (showOtpOnScreen()) return localCode(phone, /verified tester|unverified|not a valid|21608|60200/i.test(why) ? "unverified" : "twilio_error");
       return { ok: false, error: "sms_failed", detail: errText(e) };
     }
   }
@@ -47,12 +50,12 @@ export async function sendCode(phone: string): Promise<
   return { ok: false, error: "sms_not_configured" };
 }
 
-async function localCode(phone: string): Promise<{ ok: true; channel: OtpChannel; devCode: string }> {
+async function localCode(phone: string, reason?: string): Promise<{ ok: true; channel: OtpChannel; devCode: string; devReason?: string }> {
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   await getStore().saveOtp({ phone, code, expiresAt: new Date(Date.now() + OTP_TTL_SEC * 1000).toISOString(), attempts: 0 });
   localOtp.add(phone);
   console.log(`[otp] (on-screen demo mode) phone=${phone} code=${code}`);
-  return { ok: true, channel: "screen", devCode: code };
+  return { ok: true, channel: "screen", devCode: code, ...(reason ? { devReason: reason } : {}) };
 }
 
 export async function checkCode(phone: string, code: string): Promise<boolean> {

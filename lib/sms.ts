@@ -55,24 +55,44 @@ export function mapsUrl(loc: LatLng): string {
 export function tplPing(i: { distanceKm: number; skill: Skill; type: NeedType; urgency: Urgency }): string {
   return `RESQ: person ${formatDistance(i.distanceKm)} away needs a ${SKILL_LABELS[i.skill].toUpperCase()} (${TYPE_SMS_LABELS[i.type]}, ${i.urgency}). Reply YES to accept, NO to skip. Expires in ${Math.round(waveWindowMs() / 1000)} s.`;
 }
-export const tplOtp = (code: string) => `RESQ: your login code is ${code}. It expires in 5 min.`;
+export const tplOtp = (code: string) => `ResQ: ${code} is your sign-in code. It expires in 5 minutes. Never share this code with anyone.`;
 export const tplRequesterMatched = (i: { name: string; skill: Skill; distanceKm: number; phone: string }) =>
-  `RESQ: ${i.name} (${SKILL_LABELS[i.skill]}, ${formatDistance(i.distanceKm)} away) is coming. Call ${i.phone}.`;
+  `ResQ: ${i.name}, ${SKILL_LABELS[i.skill].toLowerCase()}, is on the way - ${formatDistance(i.distanceKm)} away. Call ${i.phone} if you need to.`;
 export const tplRequesterEscalated = () => "RESQ: No helper could be reached. A coordinator is alerted. Call 112 now.";
 export const tplHelperAccepted = (i: { mapsUrl: string | null; phone: string | null }) =>
-  `RESQ: You're matched. Map: ${i.mapsUrl ?? "location unknown"}. Call the requester: ${i.phone ?? "via app"}.`;
+  `ResQ: The job is yours. Customer: ${i.phone ?? "contact them in the app"}. ${i.mapsUrl ? `Directions: ${i.mapsUrl}` : "Ask them for the address."}`;
 
 /** Sent to helpers who were pinged but did not take the job, once the request is closed. */
 export const tplRequestClosed = (i: { typeLabel: string; outcome: "resolved" | "cancelled" }) =>
-  `RESQ: The ${i.typeLabel} request near you has been ${i.outcome === "resolved" ? "resolved" : "cancelled"}. No action needed. Thank you.`;
+  `ResQ: The ${i.typeLabel} request near you has been ${i.outcome === "resolved" ? "resolved" : "cancelled"}. No action needed. Thank you.`;
 
-/** New service request near a provider (they accept in the app). */
+/**
+ * Sent to everyone else who was alerted the moment somebody else takes the job. For a provider without the app the
+ * alert thread IS the job, so silence means they reply ACCEPT to something that went twenty minutes ago and get a
+ * refusal for their trouble. Deliberately worded as news about the job, never as a verdict on the reader: nobody
+ * was passed over, someone was simply first. A plain hyphen, no dash, keeps it inside one GSM-7 segment.
+ */
+export function tplJobTaken(i: { label: string; distanceKm: number | null }): string {
+  const where = typeof i.distanceKm === "number" && Number.isFinite(i.distanceKm) && i.distanceKm >= 0 ? `${formatDistance(i.distanceKm)} away` : "near you";
+  return `ResQ: the ${i.label} job ${where} has just been taken. Nothing for you to do - we will text you the next one.`;
+}
+
+/**
+ * New service request near a provider. This one has no 4-digit code because the request did not go through AI
+ * scoping, so the app is the only way to take it — which the wording has to be honest about rather than implying
+ * they can reply.
+ */
 export const tplServiceRequest = (i: { service: Skill; distanceKm: number }) =>
-  `RESQ: New ${SKILL_LABELS[i.service]} request ${formatDistance(i.distanceKm)} from you. Open the ResQ app to see details and accept.`;
+  `ResQ: New ${SKILL_LABELS[i.service].toLowerCase()} job ${formatDistance(i.distanceKm)} away. Open the ResQ app to see it and accept - first to accept gets it.`;
 
 /** Job alert for providers who are not in the app (basic phones). They claim it by replying ACCEPT <code>. */
 export function tplScopedJob(i: { category: string; title: string; minutes: number; tools: string[]; code: string; distanceKm: number }): string {
-  const tools = i.tools.length ? i.tools.join(", ") : "standard kit";
-  const msg = `[ResQ Alert] ${i.category} Job Nearby! Task: ${i.title}. Est: ${i.minutes}m. Tools: ${tools}. ${formatDistance(i.distanceKm)} away. Reply ACCEPT ${i.code} to claim.`;
-  return msg.length <= 320 ? msg : `[ResQ Alert] ${i.category} Job Nearby! Task: ${i.title.slice(0, 50)}. Est: ${i.minutes}m. Reply ACCEPT ${i.code} to claim.`;
+  const tools = i.tools.length ? i.tools.join(", ") : "your usual kit";
+  const where = formatDistance(i.distanceKm);
+  // Leads with the two things that decide whether someone puts their shoes on — what trade, and how far — then
+  // what the job is, how long it should take, and what to carry. The reply instruction is last so it is the
+  // thing still on screen when they stop reading.
+  const msg = `ResQ: ${i.category} job ${where} away. ${i.title}. About ${i.minutes} min. Bring: ${tools}. Reply ACCEPT ${i.code} to take it.`;
+  return msg.length <= 320 ? msg
+    : `ResQ: ${i.category} job ${where} away. ${i.title.slice(0, 50)}. About ${i.minutes} min. Reply ACCEPT ${i.code} to take it.`;
 }

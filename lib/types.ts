@@ -14,6 +14,8 @@ import type { NEED_TYPES, SKILLS, URGENCIES, Equipment, Tool } from "./taxonomy"
 export type { Tool } from "./taxonomy";
 export type { Equipment } from "./taxonomy";
 import type { HazardKind } from "./hazards";
+import type { LanguageCode } from "./languages";
+export type { LanguageCode } from "./languages";
 export type { HazardKind } from "./hazards";
 
 export type Skill = (typeof SKILLS)[number];
@@ -35,12 +37,16 @@ export type Helper = {
   equipment?: Equipment[]; // what they own that helps in an emergency
   trustTier?: TrustTier;        // read via tierOf() — absent on older records = TIER_1_NEIGHBOR
   credentialId?: string | null; // licence / registration number given for Tier 2 / Tier 3 (self-declared in the demo)
-  walletBalance?: number;       // read via walletOf() — credited when escrow is released
+  walletBalance?: number;       // RUPEES. read via walletOf() — credited when a disaster-era escrow is released
+  walletPaise?: number;         // PAISE.  read via walletPaiseOf() — credited when a service job is paid for.
+                                // Deliberately NOT walletBalance: the two paths use different units, and summing
+                                // them into one number would silently value a ₹500 callout fee at ₹5.
   availabilityPausedAt?: string | null; // set when availability was switched off automatically because this person asked for help
   rates?: Partial<Record<Skill, RateRange>>; // what the provider charges per service (₹, shown to people requesting it)
   idProof?: IdProof | null;                  // uploaded identity document and its verification status
   toolsOnHand?: Tool[];                      // tools the provider carries (matched against the AI's required tools)
   profile?: UserProfile;   // basic details collected at sign-up
+  language?: LanguageCode; // read via languageOf() — the language they read, speak and are called in
 };
 
 /** Basic details every user gives at sign-up. Shared with the person on the other side of an accepted request. */
@@ -98,7 +104,8 @@ export type HelpRequest = {
   fallbackAt?: string | null;          // when the 3-minute / all-waves fallback fired (LIFE_SAFETY)
   emergencyContactNotifiedAt?: string | null; // when the requester's emergency contact was texted
   service?: Skill | null;               // SERVICE requests: the service the user tapped (plumber, electrician, doctor…)
-  paymentStatus?: "due" | "paid" | null; // SERVICE requests after completion (in-app payment is a placeholder for now)
+  paymentStatus?: PaymentStatus | null;  // SERVICE requests after completion; read via paymentStatusOf()
+  servicePaise?: number | null;          // the worker's final charge for the work, entered when they mark the job done
   scope?: TaskScope | null;              // AI job breakdown (set when the request came through /api/scope-task)
   shortCode?: string | null;             // 4-digit code providers reply with by SMS: "ACCEPT 1234"
   aiMatchedWorkerIds?: string[];         // providers the AI matching engine picked (skills + tools); shown as "Matched for you"
@@ -187,7 +194,7 @@ export type OpsView = {
   generatedAt: string;
 };
 
-export type StoreErrorReason = "already_matched" | "expired" | "not_found";
+export type StoreErrorReason = "already_matched" | "expired" | "not_found" | "busy";
 
 // ─── Disaster response (authorities) ─────────────────────────────────────────────────────────────────────────
 
@@ -230,3 +237,107 @@ export type TaskScope = {
 };
 export type PhotoRequest = { what: string; angle: string; why: string };
 export type JobPhoto = { id: string; fileId: string; label: string; angle: string; mime: string; size: number; uploadedAt: string };
+
+// ── Payments, commission and receipt reimbursement (lib/money.ts, lib/razorpay.ts, lib/receipts.ts) ──────────
+/**
+ * "due" the job is done and the customer owes; "processing" a Razorpay order is open; "paid" settled and the
+ * worker's wallet credited; "failed" the gateway declined (the customer can retry); "refunded" reversed.
+ */
+export type PaymentStatus = "due" | "processing" | "paid" | "failed" | "refunded";
+
+/** One attempt to settle one job. Amounts are paise; the split is computed by lib/money.ts computeSettlement(). */
+export type Payment = {
+  id: string;
+  requestId: string;
+  customerId: string | null;   // the requester's helper id (they are a signed-in user too)
+  workerId: string;            // who gets the payout
+  provider: "razorpay" | "demo";
+  orderId: string;             // Razorpay order id, or "order_demo_…" when no keys are configured
+  paymentId: string | null;    // Razorpay payment id, set once the customer has paid
+  servicePaise: number;
+  reimbursementPaise: number;
+  commissionPct: number;
+  commissionPaise: number;
+  grossPaise: number;          // charged to the customer = service + reimbursement
+  payoutPaise: number;         // credited to the worker  = gross - commission
+  status: "created" | "paid" | "failed" | "refunded";
+  error: string | null;        // gateway or verification failure, shown to the customer verbatim-free
+  createdAt: string;
+  paidAt: string | null;
+};
+
+/** One line the vision model read off a receipt. amountPaise is null when the model could not read a figure. */
+export type ReceiptItem = { name: string; qty: number | null; amountPaise: number | null };
+
+/** What the local vision model made of a receipt photo. Advisory: the customer still approves the amount. */
+export type ReceiptAnalysis = {
+  looksLikeReceipt: boolean;
+  merchant: string | null;
+  purchasedAt: string | null;  // as printed on the receipt, free text — not parsed into a Date
+  items: ReceiptItem[];
+  totalPaise: number | null;
+  confidence: number;          // 0..1, the model's own confidence, clamped
+  model: string;               // which vision model read it
+  source: "ollama" | "manual"; // "manual" = no vision model available, the worker typed the amount
+  note: string | null;         // why an analysis is missing or was overridden
+};
+
+/**
+ * Money a worker spent on parts mid-job, claimed back from the customer. The AI reads the receipt; the CUSTOMER
+ * approves it. Approved reimbursements are added to the bill and paid to the worker without commission.
+ */
+export type Reimbursement = {
+  id: string;
+  requestId: string;
+  workerId: string;
+  fileId: string;              // GridFS id of the receipt image
+  mime: string;
+  size: number;
+  analysis: ReceiptAnalysis | null;
+  claimedPaise: number;        // what the worker is claiming (defaults to the AI total, editable by the worker)
+  note: string | null;         // worker's note, e.g. "new 1/2 inch tap + teflon tape"
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;    // customer's helper id
+};
+
+// ── Voice relay across a language barrier (lib/languages.ts, lib/translate.ts, lib/voice.ts) ─────────────────
+/**
+ * One spoken (or typed) message carried between two people who do not share a language.
+ *
+ * Both halves are kept forever: `sourceText` is what the person actually said, `translatedText` is what the other
+ * person was shown or read out to them. When a translation fails we still deliver — with the original and an
+ * honest note — because a message someone can puzzle out beats silence, and because nobody should discover after
+ * the fact that a machine quietly reworded their emergency.
+ *
+ * `recordingUrl` is the original audio when the message came in by phone. The recipient can play the real voice
+ * instead of trusting the transcript, which matters when a name or a house number is misheard.
+ */
+export type VoiceMessageStatus = "captured" | "delivering" | "delivered" | "failed";
+
+export type VoiceMessage = {
+  id: string;
+  requestId: string;
+  seq: number;                       // 1, 2, 3… the order of turns in this conversation
+  fromRole: "requester" | "helper";
+  fromHelperId: string | null;       // null when an unregistered person phoned in
+  fromPhone: string | null;
+  toHelperId: string | null;
+  toPhone: string | null;
+  sourceLang: LanguageCode;
+  targetLang: LanguageCode;
+  sourceText: string;                // what they said, in their own language
+  translatedText: string;            // what the other person gets; equals sourceText when translation failed
+  translationSource: "sarvam" | "ollama" | "passthrough" | "failed";
+  translationNote: string | null;    // shown beside the message when something went wrong
+  channel: "app" | "call";           // typed/spoken in the app, or phoned in
+  recordingUrl: string | null;       // Twilio recording of the original voice, when there is one
+  hasSpokenAudio?: boolean;          // a translated reading of this message is available to play in-app
+  recordingSec: number | null;
+  status: VoiceMessageStatus;
+  deliveryRef: string | null;        // Twilio Call SID of the outbound call that read it out, or "simulated"
+  error: string | null;
+  createdAt: string;
+  deliveredAt: string | null;
+};
